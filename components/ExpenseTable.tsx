@@ -35,6 +35,13 @@ export default function ExpenseTable({
   const [status, setStatus] = useState<Expense["status"]>("paid");
   const [installments, setInstallments] = useState("1");
 
+  const validMemberId = familyMembers.some((m) => m.id === memberId)
+    ? memberId
+    : familyMembers[0]?.id || "";
+  const validCardId = creditCards.some((c) => c.id === cardId)
+    ? cardId
+    : creditCards[0]?.id || "";
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!description || !amount) return;
@@ -47,9 +54,9 @@ export default function ExpenseTable({
       amount: parseFloat(amount),
       date,
       category,
-      memberId,
+      memberId: validMemberId,
       paymentMethod,
-      cardId: paymentMethod === "credit_card" ? cardId : undefined,
+      cardId: paymentMethod === "credit_card" ? validCardId : undefined,
       installments: totalInstallments > 1 ? totalInstallments : undefined,
       currentInstallment: totalInstallments > 1 ? 1 : undefined,
       status,
@@ -238,7 +245,7 @@ export default function ExpenseTable({
                 <div>
                   <label className="block text-xs font-semibold text-slate-600 mb-1">Membro</label>
                   <select
-                    value={memberId}
+                    value={validMemberId}
                     onChange={(e) => setMemberId(e.target.value)}
                     className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-rose-500"
                   >
@@ -269,7 +276,7 @@ export default function ExpenseTable({
                 <div>
                   <label className="block text-xs font-semibold text-slate-600 mb-1">Selecione o Cartão</label>
                   <select
-                    value={cardId}
+                    value={validCardId}
                     onChange={(e) => setCardId(e.target.value)}
                     className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-rose-500"
                   >

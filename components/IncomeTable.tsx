@@ -26,6 +26,10 @@ export default function IncomeTable({
   const [date, setDate] = useState("2026-11-14");
   const [isRecurring, setIsRecurring] = useState(true);
 
+  const validMemberId = familyMembers.some((m) => m.id === memberId)
+    ? memberId
+    : familyMembers[0]?.id || "";
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!description || !amount) return;
@@ -36,7 +40,7 @@ export default function IncomeTable({
       amount: parseFloat(amount),
       date,
       category,
-      memberId,
+      memberId: validMemberId,
       isRecurring,
     };
 
@@ -185,7 +189,7 @@ export default function IncomeTable({
                 <div>
                   <label className="block text-xs font-semibold text-slate-600 mb-1">Membro</label>
                   <select
-                    value={memberId}
+                    value={validMemberId}
                     onChange={(e) => setMemberId(e.target.value)}
                     className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-emerald-500"
                   >

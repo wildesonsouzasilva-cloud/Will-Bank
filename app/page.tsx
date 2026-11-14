@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import Navbar from "@/components/Navbar";
 import SummaryCards from "@/components/SummaryCards";
 import ChartsDashboard from "@/components/ChartsDashboard";
@@ -25,9 +25,13 @@ import {
 } from "@/lib/initial-data";
 import { Expense, Income, BudgetCategory, CreditCard, FinancialGoal, FamilyMember, DebtRecord } from "@/lib/types";
 
+const STORAGE_KEY = "willbank_financial_state_v1";
+
 export default function Home() {
   const [activeTab, setActiveTab] = useState("dashboard");
   const [month, setMonth] = useState("2026-11");
+  const [isHydrated, setIsHydrated] = useState(false);
+  const [confirmAction, setConfirmAction] = useState<"clear" | "restore" | null>(null);
 
   // App State
   const [familyMembers, setFamilyMembers] = useState<FamilyMember[]>(initialFamilyMembers);
@@ -37,6 +41,71 @@ export default function Home() {
   const [budgets, setBudgets] = useState<BudgetCategory[]>(initialBudgetCategories);
   const [goals, setGoals] = useState<FinancialGoal[]>(initialGoals);
   const [debts, setDebts] = useState<DebtRecord[]>(initialDebts);
+
+  // Carrega dados salvos no navegador ao montar (evita hydration mismatch)
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (typeof parsed.month === "string") setMonth(parsed.month);
+        if (Array.isArray(parsed.familyMembers)) setFamilyMembers(parsed.familyMembers);
+        if (Array.isArray(parsed.creditCards)) setCreditCards(parsed.creditCards);
+        if (Array.isArray(parsed.incomes)) setIncomes(parsed.incomes);
+        if (Array.isArray(parsed.expenses)) setExpenses(parsed.expenses);
+        if (Array.isArray(parsed.budgets)) setBudgets(parsed.budgets);
+        if (Array.isArray(parsed.goals)) setGoals(parsed.goals);
+        if (Array.isArray(parsed.debts)) setDebts(parsed.debts);
+      }
+    } catch (err) {
+      console.error("Erro ao carregar dados salvos:", err);
+    } finally {
+      setIsHydrated(true);
+    }
+  }, []);
+
+  const serializedState = JSON.stringify({
+    month,
+    familyMembers,
+    creditCards,
+    incomes,
+    expenses,
+    budgets,
+    goals,
+    debts,
+  });
+
+  // Salva automaticamente no navegador sempre que houver alteração
+  useEffect(() => {
+    if (!isHydrated) return;
+    try {
+      window.localStorage.setItem(STORAGE_KEY, serializedState);
+    } catch (err) {
+      console.error("Erro ao salvar dados no navegador:", err);
+    }
+  }, [isHydrated, serializedState]);
+
+  const handleClearAllData = () => {
+    setCreditCards([]);
+    setIncomes([]);
+    setExpenses([]);
+    setBudgets((prev) => prev.map((b) => ({ ...b, spent: 0 })));
+    setGoals([]);
+    setDebts([]);
+    setConfirmAction(null);
+  };
+
+  const handleRestoreDemoData = () => {
+    setMonth("2026-11");
+    setFamilyMembers(initialFamilyMembers);
+    setCreditCards(initialCreditCards);
+    setIncomes(initialIncomes);
+    setExpenses(initialExpenses);
+    setBudgets(initialBudgetCategories);
+    setGoals(initialGoals);
+    setDebts(initialDebts);
+    setConfirmAction(null);
+  };
 
   // Calculations
   const totalIncome = incomes.reduce((acc, curr) => acc + curr.amount, 0);
@@ -320,8 +389,64 @@ export default function Home() {
       </main>
 
       <footer className="bg-white border-t border-slate-200 py-4 mt-8">
-        <div className="max-w-7xl mx-auto px-4 text-center text-xs text-slate-500">
-          WillBank &copy; 2026 - Gestão Financeira Familiar Inteligente
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500">
+          <span>WillBank &copy; 2026 - Gestão Financeira Familiar Inteligente (Salvo automaticamente neste navegador)</span>
+          <div className="flex items-center gap-2">
+            {confirmAction === "clear" ? (
+              <div className="flex items-center gap-1.5 bg-rose-50 px-2.5 py-1 rounded-lg border border-rose-200">
+                <span className="text-rose-700 font-medium">Zerar lançamentos?</span>
+                <button
+                  type="button"
+                  onClick={handleClearAllData}
+                  className="px-2 py-0.5 bg-rose-600 text-white rounded font-semibold hover:bg-rose-700"
+                >
+                  Sim
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirmAction(null)}
+                  className="px-2 py-0.5 bg-white text-slate-600 rounded border border-slate-200 hover:bg-slate-50"
+                >
+                  Não
+                </button>
+              </div>
+            ) : confirmAction === "restore" ? (
+              <div className="flex items-center gap-1.5 bg-blue-50 px-2.5 py-1 rounded-lg border border-blue-200">
+                <span className="text-blue-700 font-medium">Restaurar exemplos?</span>
+                <button
+                  type="button"
+                  onClick={handleRestoreDemoData}
+                  className="px-2 py-0.5 bg-blue-600 text-white rounded font-semibold hover:bg-blue-700"
+                >
+                  Sim
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirmAction(null)}
+                  className="px-2 py-0.5 bg-white text-slate-600 rounded border border-slate-200 hover:bg-slate-50"
+                >
+                  Não
+                </button>
+              </div>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setConfirmAction("clear")}
+                  className="px-2.5 py-1 rounded-lg border border-slate-200 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200 transition-colors"
+                >
+                  Limpar dados (Começar do zero)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirmAction("restore")}
+                  className="px-2.5 py-1 rounded-lg border border-slate-200 hover:bg-slate-100 text-slate-600 transition-colors"
+                >
+                  Restaurar exemplo
+                </button>
+              </>
+            )}
+          </div>
         </div>
       </footer>
     </div>
