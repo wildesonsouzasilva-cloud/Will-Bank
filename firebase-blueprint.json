@@ -1,0 +1,239 @@
+{
+  "entities": {
+    "UserWorkspace": {
+      "title": "UserWorkspace",
+      "description": "Root workspace settings for an authenticated WillBank user.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the workspace owner.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "referenceMonth": {
+          "type": "string",
+          "description": "Active reference month in YYYY-MM format.",
+          "minLength": 7,
+          "maxLength": 7,
+          "pattern": "^\\d{4}-\\d{2}$"
+        },
+        "initialized": {
+          "type": "boolean",
+          "description": "Whether initial workspace collections have been seeded."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of workspace creation."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last update."
+        }
+      },
+      "required": ["ownerId", "referenceMonth", "initialized", "createdAt", "updatedAt"]
+    },
+    "FamilyMember": {
+      "title": "FamilyMember",
+      "description": "A family member belonging to the user's financial workspace.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "role": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "color": { "type": "string", "minLength": 1, "maxLength": 20 },
+        "avatar": { "type": "string", "maxLength": 16 },
+        "incomeShare": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerId", "name", "role", "color", "createdAt", "updatedAt"]
+    },
+    "CreditCard": {
+      "title": "CreditCard",
+      "description": "Credit card tracked in the family workspace.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "holder": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "last4": { "type": "string", "minLength": 1, "maxLength": 8 },
+        "color": { "type": "string", "minLength": 1, "maxLength": 20 },
+        "limit": { "type": "number" },
+        "used": { "type": "number" },
+        "closingDay": { "type": "number" },
+        "dueDay": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerId", "name", "holder", "last4", "color", "limit", "used", "closingDay", "dueDay", "createdAt", "updatedAt"]
+    },
+    "Income": {
+      "title": "Income",
+      "description": "Income entry for a family member.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "description": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "amount": { "type": "number" },
+        "date": { "type": "string", "minLength": 1, "maxLength": 20 },
+        "category": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "memberId": { "type": "string", "maxLength": 128 },
+        "isRecurring": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerId", "description", "amount", "date", "category", "memberId", "createdAt", "updatedAt"]
+    },
+    "Expense": {
+      "title": "Expense",
+      "description": "Expense entry tracked in the family workspace.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "description": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "amount": { "type": "number" },
+        "date": { "type": "string", "minLength": 1, "maxLength": 20 },
+        "category": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "memberId": { "type": "string", "maxLength": 128 },
+        "paymentMethod": { "type": "string", "enum": ["credit_card", "debit", "pix", "cash"] },
+        "cardId": { "type": "string", "maxLength": 128 },
+        "installments": { "type": "number" },
+        "currentInstallment": { "type": "number" },
+        "status": { "type": "string", "enum": ["paid", "pending"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerId", "description", "amount", "date", "category", "memberId", "paymentMethod", "status", "createdAt", "updatedAt"]
+    },
+    "BudgetCategory": {
+      "title": "BudgetCategory",
+      "description": "Monthly budget allocation and spend tracking per category.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "category": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "allocated": { "type": "number" },
+        "spent": { "type": "number" },
+        "color": { "type": "string", "minLength": 1, "maxLength": 20 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerId", "category", "allocated", "spent", "color", "createdAt", "updatedAt"]
+    },
+    "FinancialGoal": {
+      "title": "FinancialGoal",
+      "description": "Family savings or purchase goal.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "targetAmount": { "type": "number" },
+        "currentAmount": { "type": "number" },
+        "deadline": { "type": "string", "minLength": 1, "maxLength": 20 },
+        "category": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "color": { "type": "string", "minLength": 1, "maxLength": 20 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerId", "title", "targetAmount", "currentAmount", "deadline", "category", "color", "createdAt", "updatedAt"]
+    },
+    "DebtRecord": {
+      "title": "DebtRecord",
+      "description": "Overdue or installment debt record.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 140 },
+        "creditor": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "debtMode": { "type": "string", "enum": ["overdue", "installment"] },
+        "category": {
+          "type": "string",
+          "enum": [
+            "Empréstimo",
+            "Fatura de Cartão Atrasada",
+            "Financiamento",
+            "Boleto / Conta Atrasada",
+            "Compra Parcelada",
+            "Acordo / Renegociação",
+            "Outro"
+          ]
+        },
+        "totalAmount": { "type": "number" },
+        "originalAmount": { "type": "number" },
+        "installmentAmount": { "type": "number" },
+        "totalInstallments": { "type": "number" },
+        "paidInstallments": { "type": "number" },
+        "dueDate": { "type": "string", "minLength": 1, "maxLength": 20 },
+        "daysOverdue": { "type": "number" },
+        "interestRate": { "type": "number" },
+        "memberId": { "type": "string", "maxLength": 128 },
+        "status": { "type": "string", "enum": ["overdue", "active", "paid"] },
+        "notes": { "type": "string", "maxLength": 500 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id",
+        "ownerId",
+        "title",
+        "creditor",
+        "debtMode",
+        "category",
+        "totalAmount",
+        "installmentAmount",
+        "totalInstallments",
+        "paidInstallments",
+        "dueDate",
+        "memberId",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserWorkspace" },
+      "description": "Root workspace metadata owned by the authenticated user."
+    },
+    "/users/{userId}/familyMembers/{memberId}": {
+      "schema": { "$ref": "#/entities/FamilyMember" },
+      "description": "Family members managed within the user's workspace."
+    },
+    "/users/{userId}/creditCards/{cardId}": {
+      "schema": { "$ref": "#/entities/CreditCard" },
+      "description": "Credit cards registered in the user's workspace."
+    },
+    "/users/{userId}/incomes/{incomeId}": {
+      "schema": { "$ref": "#/entities/Income" },
+      "description": "Income entries in the user's workspace."
+    },
+    "/users/{userId}/expenses/{expenseId}": {
+      "schema": { "$ref": "#/entities/Expense" },
+      "description": "Expense entries in the user's workspace."
+    },
+    "/users/{userId}/budgets/{budgetId}": {
+      "schema": { "$ref": "#/entities/BudgetCategory" },
+      "description": "Budget categories in the user's workspace."
+    },
+    "/users/{userId}/goals/{goalId}": {
+      "schema": { "$ref": "#/entities/FinancialGoal" },
+      "description": "Financial goals in the user's workspace."
+    },
+    "/users/{userId}/debts/{debtId}": {
+      "schema": { "$ref": "#/entities/DebtRecord" },
+      "description": "Overdue and installment debt records in the user's workspace."
+    }
+  }
+}

@@ -1,7 +1,11 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
+import { onAuthStateChanged, signInWithPopup, signOut, User } from "firebase/auth";
+import { Loader2, AlertTriangle } from "lucide-react";
+
 import Navbar from "@/components/Navbar";
+import LoginScreen from "@/components/LoginScreen";
 import SummaryCards from "@/components/SummaryCards";
 import ChartsDashboard from "@/components/ChartsDashboard";
 import ExpenseTable from "@/components/ExpenseTable";
@@ -14,98 +18,202 @@ import InvestmentSimulator from "@/components/InvestmentSimulator";
 import FinFamAiAssistant from "@/components/FinFamAiAssistant";
 import PendingDebtsManager from "@/components/PendingDebtsManager";
 
+import { auth, googleProvider, testFirestoreConnection } from "@/lib/firebase";
 import {
-  initialFamilyMembers,
-  initialCreditCards,
-  initialIncomes,
-  initialExpenses,
-  initialBudgetCategories,
-  initialGoals,
-  initialDebts,
-} from "@/lib/initial-data";
-import { Expense, Income, BudgetCategory, CreditCard, FinancialGoal, FamilyMember, DebtRecord } from "@/lib/types";
+  ensureWorkspaceInitialized,
+  subscribeToWorkspace,
+  updateReferenceMonth,
+  addExpenseInCloud,
+  deleteExpenseInCloud,
+  toggleExpenseStatusInCloud,
+  payCreditCardInvoiceInCloud,
+  addIncomeInCloud,
+  deleteIncomeInCloud,
+  addCardInCloud,
+  deleteCardInCloud,
+  syncBudgetsDiffInCloud,
+  addGoalInCloud,
+  syncGoalsDiffInCloud,
+  addMemberInCloud,
+  deleteMemberInCloud,
+  addDebtInCloud,
+  payDebtInstallmentInCloud,
+  settleDebtInCloud,
+  deleteDebtInCloud,
+  clearAllCloudData,
+  restoreDemoCloudData,
+} from "@/lib/willbank-firestore";
 
-const STORAGE_KEY = "willbank_financial_state_v1";
+import {
+  Expense,
+  Income,
+  BudgetCategory,
+  CreditCard,
+  FinancialGoal,
+  FamilyMember,
+  DebtRecord,
+} from "@/lib/types";
+
+function formatAuthErrorMessage(err: unknown): string {
+  const code = (err as { code?: string })?.code || "";
+  if (code === "auth/popup-closed-by-user") {
+    return "A janela de login foi fechada antes de concluir. Tente novamente.";
+  }
+  if (code === "auth/popup-blocked") {
+    return "O navegador bloqueou o pop-up de login. Permita pop-ups para este site e tente novamente.";
+  }
+  if (code === "auth/unauthorized-domain") {
+    return "Este domínio ainda não está autorizado no Firebase Auth. Adicione o endereço do site (ex: seu-app.vercel.app) em Authentication > Settings > Authorized domains no Console do Firebase.";
+  }
+  if (code === "auth/network-request-failed") {
+    return "Falha de conexão com a internet ao tentar entrar com Google.";
+  }
+  return err instanceof Error ? err.message : "Não foi possível entrar com sua conta Google.";
+}
 
 export default function Home() {
+  const [user, setUser] = useState<User | null>(null);
+  const [isAuthReady, setIsAuthReady] = useState(false);
+  const [isSigningIn, setIsSigningIn] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [isLoadingWorkspace, setIsLoadingWorkspace] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
+
   const [activeTab, setActiveTab] = useState("dashboard");
   const [month, setMonth] = useState("2026-11");
-  const [isHydrated, setIsHydrated] = useState(false);
   const [confirmAction, setConfirmAction] = useState<"clear" | "restore" | null>(null);
 
-  // App State
-  const [familyMembers, setFamilyMembers] = useState<FamilyMember[]>(initialFamilyMembers);
-  const [creditCards, setCreditCards] = useState<CreditCard[]>(initialCreditCards);
-  const [incomes, setIncomes] = useState<Income[]>(initialIncomes);
-  const [expenses, setExpenses] = useState<Expense[]>(initialExpenses);
-  const [budgets, setBudgets] = useState<BudgetCategory[]>(initialBudgetCategories);
-  const [goals, setGoals] = useState<FinancialGoal[]>(initialGoals);
-  const [debts, setDebts] = useState<DebtRecord[]>(initialDebts);
+  // Cloud-synced App State
+  const [familyMembers, setFamilyMembers] = useState<FamilyMember[]>([]);
+  const [creditCards, setCreditCards] = useState<CreditCard[]>([]);
+  const [incomes, setIncomes] = useState<Income[]>([]);
+  const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [budgets, setBudgets] = useState<BudgetCategory[]>([]);
+  const [goals, setGoals] = useState<FinancialGoal[]>([]);
+  const [debts, setDebts] = useState<DebtRecord[]>([]);
 
-  // Carrega dados salvos no navegador ao montar (evita hydration mismatch)
   useEffect(() => {
-    try {
-      const saved = window.localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (typeof parsed.month === "string") setMonth(parsed.month);
-        if (Array.isArray(parsed.familyMembers)) setFamilyMembers(parsed.familyMembers);
-        if (Array.isArray(parsed.creditCards)) setCreditCards(parsed.creditCards);
-        if (Array.isArray(parsed.incomes)) setIncomes(parsed.incomes);
-        if (Array.isArray(parsed.expenses)) setExpenses(parsed.expenses);
-        if (Array.isArray(parsed.budgets)) setBudgets(parsed.budgets);
-        if (Array.isArray(parsed.goals)) setGoals(parsed.goals);
-        if (Array.isArray(parsed.debts)) setDebts(parsed.debts);
+    testFirestoreConnection();
+    const unsubAuth = onAuthStateChanged(auth, (firebaseUser) => {
+      setUser(firebaseUser);
+      setIsAuthReady(true);
+      if (!firebaseUser) {
+        setFamilyMembers([]);
+        setCreditCards([]);
+        setIncomes([]);
+        setExpenses([]);
+        setBudgets([]);
+        setGoals([]);
+        setDebts([]);
+        setIsLoadingWorkspace(false);
       }
+    });
+    return () => unsubAuth();
+  }, []);
+
+  useEffect(() => {
+    if (!isAuthReady || !user) return;
+
+    let cancelled = false;
+    let unsubscribeData: (() => void) | null = null;
+    const uid = user.uid;
+
+    const initAndSubscribe = async () => {
+      setIsLoadingWorkspace(true);
+      setSyncError(null);
+      try {
+        await ensureWorkspaceInitialized(uid);
+        if (cancelled) return;
+
+        unsubscribeData = subscribeToWorkspace(uid, {
+          onMonth: setMonth,
+          onFamilyMembers: setFamilyMembers,
+          onCreditCards: setCreditCards,
+          onIncomes: setIncomes,
+          onExpenses: setExpenses,
+          onBudgets: setBudgets,
+          onGoals: setGoals,
+          onDebts: setDebts,
+          onSyncReady: () => {
+            if (!cancelled) setIsLoadingWorkspace(false);
+          },
+        });
+      } catch (err) {
+        if (!cancelled) {
+          console.error("Erro ao sincronizar workspace Firebase:", err);
+          setSyncError(
+            "Não foi possível carregar seus dados do Firebase. Verifique sua conexão ou permissões."
+          );
+          setIsLoadingWorkspace(false);
+        }
+      }
+    };
+
+    initAndSubscribe();
+
+    return () => {
+      cancelled = true;
+      if (unsubscribeData) {
+        unsubscribeData();
+      }
+    };
+  }, [isAuthReady, user]);
+
+  const handleSignIn = useCallback(async () => {
+    setIsSigningIn(true);
+    setAuthError(null);
+    try {
+      await signInWithPopup(auth, googleProvider);
     } catch (err) {
-      console.error("Erro ao carregar dados salvos:", err);
+      setAuthError(formatAuthErrorMessage(err));
     } finally {
-      setIsHydrated(true);
+      setIsSigningIn(false);
     }
   }, []);
 
-  const serializedState = JSON.stringify({
-    month,
-    familyMembers,
-    creditCards,
-    incomes,
-    expenses,
-    budgets,
-    goals,
-    debts,
-  });
+  const handleSignOut = useCallback(async () => {
+    setConfirmAction(null);
+    setSyncError(null);
+    await signOut(auth);
+  }, []);
 
-  // Salva automaticamente no navegador sempre que houver alteração
-  useEffect(() => {
-    if (!isHydrated) return;
+  const runCloudAction = async (fn: () => Promise<void>) => {
     try {
-      window.localStorage.setItem(STORAGE_KEY, serializedState);
+      setSyncError(null);
+      await fn();
     } catch (err) {
-      console.error("Erro ao salvar dados no navegador:", err);
+      console.error("Erro na operação em nuvem:", err);
+      setSyncError("Erro ao salvar alteração no Firebase. Tente novamente.");
     }
-  }, [isHydrated, serializedState]);
-
-  const handleClearAllData = () => {
-    setCreditCards([]);
-    setIncomes([]);
-    setExpenses([]);
-    setBudgets((prev) => prev.map((b) => ({ ...b, spent: 0 })));
-    setGoals([]);
-    setDebts([]);
-    setConfirmAction(null);
   };
 
-  const handleRestoreDemoData = () => {
-    setMonth("2026-11");
-    setFamilyMembers(initialFamilyMembers);
-    setCreditCards(initialCreditCards);
-    setIncomes(initialIncomes);
-    setExpenses(initialExpenses);
-    setBudgets(initialBudgetCategories);
-    setGoals(initialGoals);
-    setDebts(initialDebts);
-    setConfirmAction(null);
-  };
+  if (!isAuthReady) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center gap-3 text-slate-600">
+        <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+        <p className="text-sm font-medium">Verificando sessão WillBank...</p>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <LoginScreen
+        onSignIn={handleSignIn}
+        isSigningIn={isSigningIn}
+        errorMessage={authError}
+      />
+    );
+  }
+
+  if (isLoadingWorkspace) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center gap-3 text-slate-600">
+        <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+        <p className="text-sm font-medium">Sincronizando suas finanças na nuvem...</p>
+      </div>
+    );
+  }
 
   // Calculations
   const totalIncome = incomes.reduce((acc, curr) => acc + curr.amount, 0);
@@ -127,115 +235,182 @@ export default function Home() {
     pendingExpenses.length + creditCards.filter((c) => c.used > 0).length + activeDebts.length;
 
   // Handlers
+  const handleMonthChange = (nextMonth: string) => {
+    setMonth(nextMonth);
+    void runCloudAction(() => updateReferenceMonth(user.uid, nextMonth));
+  };
+
   const handleAddExpense = (newExpense: Expense) => {
-    setExpenses((prev) => [newExpense, ...prev]);
-
-    // Automatically update budget category spent
-    setBudgets((prev) =>
-      prev.map((b) =>
-        b.category.toLowerCase() === newExpense.category.toLowerCase()
-          ? { ...b, spent: b.spent + newExpense.amount }
-          : b
-      )
+    const matchingBudget = budgets.find(
+      (b) => b.category.toLowerCase() === newExpense.category.toLowerCase()
     );
+    const matchingCard =
+      newExpense.paymentMethod === "credit_card" && newExpense.cardId
+        ? creditCards.find((c) => c.id === newExpense.cardId)
+        : undefined;
 
-    // If paid by credit card, update card used amount
-    if (newExpense.paymentMethod === "credit_card" && newExpense.cardId) {
-      setCreditCards((prev) =>
-        prev.map((c) =>
-          c.id === newExpense.cardId ? { ...c, used: c.used + newExpense.amount } : c
+    setExpenses((prev) => [newExpense, ...prev]);
+    if (matchingBudget) {
+      setBudgets((prev) =>
+        prev.map((b) =>
+          b.id === matchingBudget.id ? { ...b, spent: b.spent + newExpense.amount } : b
         )
       );
     }
+    if (matchingCard) {
+      setCreditCards((prev) =>
+        prev.map((c) =>
+          c.id === matchingCard.id ? { ...c, used: c.used + newExpense.amount } : c
+        )
+      );
+    }
+
+    void runCloudAction(() =>
+      addExpenseInCloud(user.uid, newExpense, matchingBudget, matchingCard)
+    );
   };
 
   const handleDeleteExpense = (id: string) => {
     const exp = expenses.find((e) => e.id === id);
     if (!exp) return;
 
-    setExpenses((prev) => prev.filter((e) => e.id !== id));
-
-    // Update budget category spent
-    setBudgets((prev) =>
-      prev.map((b) =>
-        b.category.toLowerCase() === exp.category.toLowerCase()
-          ? { ...b, spent: Math.max(0, b.spent - exp.amount) }
-          : b
-      )
+    const matchingBudget = budgets.find(
+      (b) => b.category.toLowerCase() === exp.category.toLowerCase()
     );
+    const matchingCard =
+      exp.paymentMethod === "credit_card" && exp.cardId
+        ? creditCards.find((c) => c.id === exp.cardId)
+        : undefined;
 
-    // If was credit card, deduct from card
-    if (exp.paymentMethod === "credit_card" && exp.cardId) {
-      setCreditCards((prev) =>
-        prev.map((c) =>
-          c.id === exp.cardId ? { ...c, used: Math.max(0, c.used - exp.amount) } : c
+    setExpenses((prev) => prev.filter((e) => e.id !== id));
+    if (matchingBudget) {
+      setBudgets((prev) =>
+        prev.map((b) =>
+          b.id === matchingBudget.id ? { ...b, spent: Math.max(0, b.spent - exp.amount) } : b
         )
       );
     }
+    if (matchingCard) {
+      setCreditCards((prev) =>
+        prev.map((c) =>
+          c.id === matchingCard.id ? { ...c, used: Math.max(0, c.used - exp.amount) } : c
+        )
+      );
+    }
+
+    void runCloudAction(() => deleteExpenseInCloud(user.uid, exp, matchingBudget, matchingCard));
   };
 
   const handleToggleExpenseStatus = (id: string) => {
+    const target = expenses.find((e) => e.id === id);
+    if (!target) return;
+
     setExpenses((prev) =>
       prev.map((e) =>
         e.id === id ? { ...e, status: e.status === "paid" ? "pending" : "paid" } : e
       )
     );
+    void runCloudAction(() => toggleExpenseStatusInCloud(user.uid, target));
   };
 
   const handlePayCreditCardInvoice = (cardId: string) => {
+    const pendingCardExpenses = expenses.filter(
+      (e) => e.paymentMethod === "credit_card" && e.cardId === cardId && e.status !== "paid"
+    );
+
     setCreditCards((prev) =>
       prev.map((c) => (c.id === cardId ? { ...c, used: 0 } : c))
     );
-    // Mark associated pending credit card expenses as paid
     setExpenses((prev) =>
       prev.map((e) =>
         e.paymentMethod === "credit_card" && e.cardId === cardId ? { ...e, status: "paid" } : e
       )
     );
+
+    void runCloudAction(() =>
+      payCreditCardInvoiceInCloud(user.uid, cardId, pendingCardExpenses)
+    );
   };
 
   const handleAddIncome = (newIncome: Income) => {
     setIncomes((prev) => [newIncome, ...prev]);
+    void runCloudAction(() => addIncomeInCloud(user.uid, newIncome));
   };
 
   const handleDeleteIncome = (id: string) => {
     setIncomes((prev) => prev.filter((i) => i.id !== id));
+    void runCloudAction(() => deleteIncomeInCloud(user.uid, id));
   };
 
   const handleAddCard = (newCard: CreditCard) => {
     setCreditCards((prev) => [...prev, newCard]);
+    void runCloudAction(() => addCardInCloud(user.uid, newCard));
   };
 
   const handleDeleteCard = (cardId: string) => {
+    const linkedExpenses = expenses.filter((e) => e.cardId === cardId);
     setCreditCards((prev) => prev.filter((c) => c.id !== cardId));
-    // Remove reference from expenses or convert to other method
     setExpenses((prev) =>
       prev.map((e) => (e.cardId === cardId ? { ...e, cardId: undefined } : e))
     );
+    void runCloudAction(() => deleteCardInCloud(user.uid, cardId, linkedExpenses));
+  };
+
+  const handleUpdateBudgets = (nextBudgets: BudgetCategory[]) => {
+    const prevBudgets = budgets;
+    setBudgets(nextBudgets);
+    void runCloudAction(() => syncBudgetsDiffInCloud(user.uid, prevBudgets, nextBudgets));
   };
 
   const handleAddGoal = (newGoal: FinancialGoal) => {
     setGoals((prev) => [...prev, newGoal]);
+    void runCloudAction(() => addGoalInCloud(user.uid, newGoal));
+  };
+
+  const handleUpdateGoals = (nextGoals: FinancialGoal[]) => {
+    const prevGoals = goals;
+    setGoals(nextGoals);
+    void runCloudAction(() => syncGoalsDiffInCloud(user.uid, prevGoals, nextGoals));
   };
 
   const handleAddMember = (newMember: FamilyMember) => {
     setFamilyMembers((prev) => [...prev, newMember]);
+    void runCloudAction(() => addMemberInCloud(user.uid, newMember));
   };
 
   const handleDeleteMember = (id: string) => {
     const remaining = familyMembers.filter((m) => m.id !== id);
     const fallbackId = remaining[0]?.id || "";
+    const affectedExpenses = expenses.filter((e) => e.memberId === id);
+    const affectedIncomes = incomes.filter((i) => i.memberId === id);
+    const affectedDebts = debts.filter((d) => d.memberId === id);
+
     setFamilyMembers(remaining);
     setExpenses((exps) => exps.map((e) => (e.memberId === id ? { ...e, memberId: fallbackId } : e)));
     setIncomes((incs) => incs.map((i) => (i.memberId === id ? { ...i, memberId: fallbackId } : i)));
     setDebts((ds) => ds.map((d) => (d.memberId === id ? { ...d, memberId: fallbackId } : d)));
+
+    void runCloudAction(() =>
+      deleteMemberInCloud(
+        user.uid,
+        id,
+        fallbackId,
+        affectedExpenses,
+        affectedIncomes,
+        affectedDebts
+      )
+    );
   };
 
   const handleAddDebt = (newDebt: DebtRecord) => {
     setDebts((prev) => [newDebt, ...prev]);
+    void runCloudAction(() => addDebtInCloud(user.uid, newDebt));
   };
 
   const handlePayDebtInstallment = (id: string) => {
+    const target = debts.find((d) => d.id === id);
+    if (!target || target.status === "paid") return;
+
     setDebts((prev) =>
       prev.map((d) => {
         if (d.id !== id) return d;
@@ -247,18 +422,41 @@ export default function Home() {
         };
       })
     );
+    void runCloudAction(() => payDebtInstallmentInCloud(user.uid, target));
   };
 
   const handleSettleDebt = (id: string) => {
+    const target = debts.find((d) => d.id === id);
+    if (!target || target.status === "paid") return;
+
     setDebts((prev) =>
       prev.map((d) =>
         d.id === id ? { ...d, paidInstallments: d.totalInstallments, status: "paid" } : d
       )
     );
+    void runCloudAction(() => settleDebtInCloud(user.uid, target));
   };
 
   const handleDeleteDebt = (id: string) => {
     setDebts((prev) => prev.filter((d) => d.id !== id));
+    void runCloudAction(() => deleteDebtInCloud(user.uid, id));
+  };
+
+  const handleClearAllData = () => {
+    const currentBudgets = budgets;
+    setCreditCards([]);
+    setIncomes([]);
+    setExpenses([]);
+    setBudgets((prev) => prev.map((b) => ({ ...b, spent: 0 })));
+    setGoals([]);
+    setDebts([]);
+    setConfirmAction(null);
+    void runCloudAction(() => clearAllCloudData(user.uid, currentBudgets));
+  };
+
+  const handleRestoreDemoData = () => {
+    setConfirmAction(null);
+    void runCloudAction(() => restoreDemoCloudData(user.uid));
   };
 
   return (
@@ -267,12 +465,32 @@ export default function Home() {
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         month={month}
-        setMonth={setMonth}
+        setMonth={handleMonthChange}
         pendingDebtsCount={pendingDebtsCount}
+        userName={user.displayName}
+        userEmail={user.email}
+        onSignOut={handleSignOut}
       />
 
+      {syncError && (
+        <div className="max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 pt-4">
+          <div className="flex items-center justify-between gap-3 p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 shrink-0" />
+              <span>{syncError}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setSyncError(null)}
+              className="px-2 py-0.5 rounded bg-white border border-rose-200 text-rose-700 font-medium hover:bg-rose-100"
+            >
+              Fechar
+            </button>
+          </div>
+        </div>
+      )}
+
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
-        {/* Top KPI Cards (Always visible on dashboard, or customizable) */}
         {activeTab === "dashboard" && (
           <>
             <SummaryCards
@@ -347,7 +565,7 @@ export default function Home() {
         )}
 
         {activeTab === "budget" && (
-          <BudgetMonitor budgets={budgets} onUpdateBudget={setBudgets} />
+          <BudgetMonitor budgets={budgets} onUpdateBudget={handleUpdateBudgets} />
         )}
 
         {activeTab === "cards" && (
@@ -362,7 +580,7 @@ export default function Home() {
           <GoalsManager
             goals={goals}
             onAddGoal={handleAddGoal}
-            onUpdateGoal={setGoals}
+            onUpdateGoal={handleUpdateGoals}
           />
         )}
 
@@ -390,7 +608,7 @@ export default function Home() {
 
       <footer className="bg-white border-t border-slate-200 py-4 mt-8">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500">
-          <span>WillBank &copy; 2026 - Gestão Financeira Familiar Inteligente (Salvo automaticamente neste navegador)</span>
+          <span>WillBank &copy; 2026 - Gestão Financeira Familiar (Sincronizado na nuvem com Firebase)</span>
           <div className="flex items-center gap-2">
             {confirmAction === "clear" ? (
               <div className="flex items-center gap-1.5 bg-rose-50 px-2.5 py-1 rounded-lg border border-rose-200">
