@@ -23,7 +23,7 @@ export default function IncomeTable({
   const [amount, setAmount] = useState("");
   const [category, setCategory] = useState("Salário");
   const [memberId, setMemberId] = useState(familyMembers[0]?.id || "");
-  const [date, setDate] = useState("2026-08-20");
+  const [date, setDate] = useState("2026-11-14");
   const [isRecurring, setIsRecurring] = useState(true);
 
   const handleSubmit = (e: React.FormEvent) => {

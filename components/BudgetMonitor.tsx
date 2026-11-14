@@ -3,16 +3,34 @@
 import React, { useState } from "react";
 import { BudgetCategory } from "@/lib/types";
 import { formatCurrency } from "@/lib/utils";
-import { Plus, Edit2, AlertTriangle, CheckCircle2 } from "lucide-react";
+import { Plus, Edit2, AlertTriangle, CheckCircle2, Trash2 } from "lucide-react";
 
 interface BudgetMonitorProps {
   budgets: BudgetCategory[];
   onUpdateBudget: (budgets: BudgetCategory[]) => void;
 }
 
+const COLOR_OPTIONS = [
+  "#3B82F6",
+  "#10B981",
+  "#8B5CF6",
+  "#EC4899",
+  "#F59E0B",
+  "#06B6D4",
+  "#EF4444",
+  "#6366F1",
+  "#14B8A6",
+  "#F97316",
+];
+
 export default function BudgetMonitor({ budgets, onUpdateBudget }: BudgetMonitorProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [newAllocated, setNewAllocated] = useState("");
+
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const [newCategoryLimit, setNewCategoryLimit] = useState("");
+  const [newCategoryColor, setNewCategoryColor] = useState(COLOR_OPTIONS[0]);
 
   const handleSave = (id: string) => {
     if (!newAllocated) return;
@@ -24,6 +42,42 @@ export default function BudgetMonitor({ budgets, onUpdateBudget }: BudgetMonitor
     setNewAllocated("");
   };
 
+  const handleAddCategory = (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = newCategoryName.trim();
+    if (!trimmed || !newCategoryLimit) return;
+
+    const alreadyExists = budgets.some(
+      (b) => b.category.toLowerCase() === trimmed.toLowerCase()
+    );
+    if (alreadyExists) {
+      const updated = budgets.map((b) =>
+        b.category.toLowerCase() === trimmed.toLowerCase()
+          ? { ...b, allocated: parseFloat(newCategoryLimit), color: newCategoryColor }
+          : b
+      );
+      onUpdateBudget(updated);
+    } else {
+      const newCategory: BudgetCategory = {
+        id: `b-${Date.now()}`,
+        category: trimmed,
+        allocated: parseFloat(newCategoryLimit),
+        spent: 0,
+        color: newCategoryColor,
+      };
+      onUpdateBudget([...budgets, newCategory]);
+    }
+
+    setShowAddModal(false);
+    setNewCategoryName("");
+    setNewCategoryLimit("");
+    setNewCategoryColor(COLOR_OPTIONS[0]);
+  };
+
+  const handleDeleteCategory = (id: string) => {
+    onUpdateBudget(budgets.filter((b) => b.id !== id));
+  };
+
   const totalAllocated = budgets.reduce((acc, b) => acc + b.allocated, 0);
   const totalSpent = budgets.reduce((acc, b) => acc + b.spent, 0);
 
@@ -33,9 +87,9 @@ export default function BudgetMonitor({ budgets, onUpdateBudget }: BudgetMonitor
       <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs flex flex-wrap items-center justify-between gap-4">
         <div>
           <h3 className="font-bold text-slate-900 text-lg">Monitoramento de Tetos Orçamentários</h3>
-          <p className="text-xs text-slate-500">Defina limites por categoria e evite surpresas no final do mês</p>
+          <p className="text-xs text-slate-500">Defina limites por categoria e adicione novas categorias de orçamento</p>
         </div>
-        <div className="flex items-center gap-6">
+        <div className="flex flex-wrap items-center gap-6">
           <div className="text-right">
             <span className="text-xs text-slate-500 font-medium block">Total Orçado</span>
             <span className="text-base font-bold text-slate-900">{formatCurrency(totalAllocated)}</span>
@@ -46,6 +100,13 @@ export default function BudgetMonitor({ budgets, onUpdateBudget }: BudgetMonitor
               {formatCurrency(totalSpent)}
             </span>
           </div>
+          <button
+            onClick={() => setShowAddModal(true)}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl text-xs sm:text-sm font-semibold hover:bg-blue-700 transition-colors shadow-xs"
+          >
+            <Plus className="w-4 h-4" />
+            Nova Categoria
+          </button>
         </div>
       </div>
 
@@ -63,16 +124,27 @@ export default function BudgetMonitor({ budgets, onUpdateBudget }: BudgetMonitor
                   <span className="w-3 h-3 rounded-full" style={{ backgroundColor: b.color }} />
                   {b.category}
                 </span>
-                <button
-                  onClick={() => {
-                    setEditingId(b.id);
-                    setNewAllocated(b.allocated.toString());
-                  }}
-                  className="text-slate-400 hover:text-blue-600 p-1 transition-colors"
-                  title="Editar limite"
-                >
-                  <Edit2 className="w-3.5 h-3.5" />
-                </button>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => {
+                      setEditingId(b.id);
+                      setNewAllocated(b.allocated.toString());
+                    }}
+                    className="text-slate-400 hover:text-blue-600 p-1 transition-colors"
+                    title="Editar limite"
+                  >
+                    <Edit2 className="w-3.5 h-3.5" />
+                  </button>
+                  {budgets.length > 1 && (
+                    <button
+                      onClick={() => handleDeleteCategory(b.id)}
+                      className="text-slate-400 hover:text-rose-600 p-1 transition-colors"
+                      title="Excluir categoria"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
               </div>
 
               <div className="mt-4">
@@ -134,6 +206,76 @@ export default function BudgetMonitor({ budgets, onUpdateBudget }: BudgetMonitor
           );
         })}
       </div>
+
+      {/* Modal Nova Categoria de Orçamento */}
+      {showAddModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-xs p-4">
+          <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-xl border border-slate-200">
+            <h3 className="text-lg font-bold text-slate-900 mb-4">Nova Categoria no Orçamento</h3>
+            <form onSubmit={handleAddCategory} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Nome da Categoria</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ex: Pets, Assinaturas, Vestuário, Dívidas..."
+                  value={newCategoryName}
+                  onChange={(e) => setNewCategoryName(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Teto / Limite Mensal (R$)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="1"
+                  required
+                  placeholder="Ex: 800,00"
+                  value={newCategoryLimit}
+                  onChange={(e) => setNewCategoryLimit(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-2">Cor da Categoria</label>
+                <div className="flex flex-wrap gap-2">
+                  {COLOR_OPTIONS.map((color) => (
+                    <button
+                      key={color}
+                      type="button"
+                      onClick={() => setNewCategoryColor(color)}
+                      className={`w-7 h-7 rounded-full border-2 transition-transform ${
+                        newCategoryColor === color ? "border-slate-900 scale-110" : "border-transparent"
+                      }`}
+                      style={{ backgroundColor: color }}
+                      aria-label={`Selecionar cor ${color}`}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3">
+                <button
+                  type="button"
+                  onClick={() => setShowAddModal(false)}
+                  className="px-4 py-2 border border-slate-200 text-slate-600 text-xs sm:text-sm rounded-xl font-medium hover:bg-slate-50 transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-blue-600 text-white text-xs sm:text-sm rounded-xl font-semibold hover:bg-blue-700 transition-colors shadow-xs"
+                >
+                  Adicionar Categoria
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

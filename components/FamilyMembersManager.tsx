@@ -3,13 +3,14 @@
 import React, { useState } from "react";
 import { FamilyMember, Expense, Income } from "@/lib/types";
 import { formatCurrency } from "@/lib/utils";
-import { Users, Plus, Shield, Award } from "lucide-react";
+import { Plus, Trash2 } from "lucide-react";
 
 interface FamilyMembersManagerProps {
   members: FamilyMember[];
   expenses: Expense[];
   incomes: Income[];
   onAddMember: (member: FamilyMember) => void;
+  onDeleteMember: (id: string) => void;
 }
 
 export default function FamilyMembersManager({
@@ -17,8 +18,10 @@ export default function FamilyMembersManager({
   expenses,
   incomes,
   onAddMember,
+  onDeleteMember,
 }: FamilyMembersManagerProps) {
   const [showModal, setShowModal] = useState(false);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [role, setRole] = useState("Filho(a)");
   const [avatar, setAvatar] = useState("🧑");
@@ -71,14 +74,28 @@ export default function FamilyMembersManager({
           return (
             <div key={member.id} className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs flex flex-col justify-between">
               <div>
-                <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 rounded-2xl bg-slate-100 flex items-center justify-center text-2xl shadow-inner">
-                    {member.avatar || "👤"}
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 rounded-2xl bg-slate-100 flex items-center justify-center text-2xl shadow-inner shrink-0">
+                      {member.avatar || "👤"}
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-slate-900 text-base">{member.name}</h4>
+                      <span className="text-xs text-slate-500 font-medium">{member.role}</span>
+                    </div>
                   </div>
-                  <div>
-                    <h4 className="font-bold text-slate-900 text-base">{member.name}</h4>
-                    <span className="text-xs text-slate-500 font-medium">{member.role}</span>
-                  </div>
+                  {members.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setConfirmDeleteId(confirmDeleteId === member.id ? null : member.id)
+                      }
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors"
+                      title="Excluir membro da família"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  )}
                 </div>
 
                 <div className="mt-5 space-y-2 pt-4 border-t border-slate-100 text-xs">
@@ -93,10 +110,35 @@ export default function FamilyMembersManager({
                 </div>
               </div>
 
-              <div className="mt-4 pt-3 border-t border-slate-100 flex justify-between items-center text-xs">
-                <span className="text-slate-400">Status</span>
-                <span className="text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md font-medium">Ativo</span>
-              </div>
+              {confirmDeleteId === member.id ? (
+                <div className="mt-4 pt-3 border-t border-rose-100 flex items-center justify-between gap-2 text-xs">
+                  <span className="text-rose-700 font-semibold">Remover membro?</span>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onDeleteMember(member.id);
+                        setConfirmDeleteId(null);
+                      }}
+                      className="px-2.5 py-1 bg-rose-600 text-white rounded-lg font-semibold hover:bg-rose-700 transition-colors"
+                    >
+                      Sim
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDeleteId(null)}
+                      className="px-2.5 py-1 bg-slate-100 text-slate-600 rounded-lg font-medium hover:bg-slate-200 transition-colors"
+                    >
+                      Não
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-4 pt-3 border-t border-slate-100 flex justify-between items-center text-xs">
+                  <span className="text-slate-400">Status</span>
+                  <span className="text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md font-medium">Ativo</span>
+                </div>
+              )}
             </div>
           );
         })}

@@ -9,6 +9,7 @@ interface ExpenseTableProps {
   expenses: Expense[];
   familyMembers: FamilyMember[];
   creditCards: CreditCard[];
+  budgetCategories?: string[];
   onAddExpense: (expense: Expense) => void;
   onDeleteExpense: (id: string) => void;
   onToggleStatus?: (id: string) => void;
@@ -18,6 +19,7 @@ export default function ExpenseTable({
   expenses,
   familyMembers,
   creditCards,
+  budgetCategories = [],
   onAddExpense,
   onDeleteExpense,
   onToggleStatus,
@@ -27,14 +29,17 @@ export default function ExpenseTable({
   const [amount, setAmount] = useState("");
   const [category, setCategory] = useState("Alimentação");
   const [memberId, setMemberId] = useState(familyMembers[0]?.id || "");
-  const [date, setDate] = useState("2026-08-20");
+  const [date, setDate] = useState("2026-11-14");
   const [paymentMethod, setPaymentMethod] = useState<Expense["paymentMethod"]>("pix");
   const [cardId, setCardId] = useState(creditCards[0]?.id || "");
   const [status, setStatus] = useState<Expense["status"]>("paid");
+  const [installments, setInstallments] = useState("1");
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!description || !amount) return;
+
+    const totalInstallments = Math.max(1, parseInt(installments) || 1);
 
     const newExpense: Expense = {
       id: `exp-${Date.now()}`,
@@ -45,6 +50,8 @@ export default function ExpenseTable({
       memberId,
       paymentMethod,
       cardId: paymentMethod === "credit_card" ? cardId : undefined,
+      installments: totalInstallments > 1 ? totalInstallments : undefined,
+      currentInstallment: totalInstallments > 1 ? 1 : undefined,
       status,
     };
 
@@ -53,9 +60,11 @@ export default function ExpenseTable({
     setDescription("");
     setAmount("");
     setStatus("paid");
+    setInstallments("1");
   };
 
-  const categories = ["Moradia", "Alimentação", "Educação", "Saúde", "Transporte", "Lazer", "Outros"];
+  const defaultCategories = ["Moradia", "Alimentação", "Educação", "Saúde", "Transporte", "Lazer", "Outros"];
+  const categories = Array.from(new Set([...budgetCategories, ...defaultCategories]));
 
   return (
     <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
@@ -119,7 +128,12 @@ export default function ExpenseTable({
                   </td>
                   <td className="px-6 py-4 font-medium text-slate-900 flex items-center gap-2">
                     <span className="w-2 h-2 rounded-full bg-rose-500 shrink-0" />
-                    {expense.description}
+                    <span>{expense.description}</span>
+                    {expense.installments && expense.installments > 1 && (
+                      <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700">
+                        {expense.currentInstallment || 1}/{expense.installments}x
+                      </span>
+                    )}
                   </td>
                   <td className="px-6 py-4">
                     <span className="px-2.5 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-700">
@@ -267,6 +281,22 @@ export default function ExpenseTable({
                   </select>
                 </div>
               )}
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Parcelamento</label>
+                <select
+                  value={installments}
+                  onChange={(e) => setInstallments(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-rose-500"
+                >
+                  <option value="1">À vista (1x)</option>
+                  {[2, 3, 4, 5, 6, 8, 10, 12, 18, 24].map((n) => (
+                    <option key={n} value={n.toString()}>
+                      {n}x parcelado
+                    </option>
+                  ))}
+                </select>
+              </div>
 
               <div>
                 <label className="block text-xs font-semibold text-slate-600 mb-1">Status da Despesa</label>

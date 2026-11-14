@@ -67,3 +67,29 @@ export interface InvestmentSimulation {
   annualRate: number;
   years: number;
 }
+
+export interface DebtRecord {
+  id: string;
+  title: string;
+  creditor: string;
+  debtMode: "overdue" | "installment";
+  category:
+    | "Empréstimo"
+    | "Fatura de Cartão Atrasada"
+    | "Financiamento"
+    | "Boleto / Conta Atrasada"
+    | "Compra Parcelada"
+    | "Acordo / Renegociação"
+    | "Outro";
+  totalAmount: number;
+  originalAmount?: number;
+  installmentAmount: number;
+  totalInstallments: number;
+  paidInstallments: number;
+  dueDate: string;
+  daysOverdue?: number;
+  interestRate?: number;
+  memberId: string;
+  status: "overdue" | "active" | "paid";
+  notes?: string;
+}

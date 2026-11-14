@@ -1,55 +1,190 @@
 "use client";
 
 import React, { useState } from "react";
-import { Expense, FamilyMember, CreditCard } from "@/lib/types";
+import { Expense, FamilyMember, CreditCard, DebtRecord } from "@/lib/types";
 import { formatCurrency, formatDate } from "@/lib/utils";
-import { 
-  AlertCircle, 
-  CheckCircle2, 
-  Clock, 
-  CreditCard as CardIcon, 
-  Calendar, 
-  Filter, 
-  ArrowUpRight, 
-  DollarSign, 
+import {
+  AlertCircle,
+  CheckCircle2,
+  Clock,
+  CreditCard as CardIcon,
   CalendarClock,
-  Check
+  Check,
+  Plus,
+  Trash2,
+  AlertTriangle,
+  Layers,
 } from "lucide-react";
 
 interface PendingDebtsManagerProps {
   expenses: Expense[];
   creditCards: CreditCard[];
   familyMembers: FamilyMember[];
+  debts: DebtRecord[];
   onToggleStatus: (id: string) => void;
   onPayCreditCardInvoice?: (cardId: string) => void;
+  onAddDebt: (debt: DebtRecord) => void;
+  onPayDebtInstallment: (id: string) => void;
+  onSettleDebt: (id: string) => void;
+  onDeleteDebt: (id: string) => void;
 }
+
+const DEBT_CATEGORIES: DebtRecord["category"][] = [
+  "Empréstimo",
+  "Fatura de Cartão Atrasada",
+  "Financiamento",
+  "Boleto / Conta Atrasada",
+  "Compra Parcelada",
+  "Acordo / Renegociação",
+  "Outro",
+];
 
 export default function PendingDebtsManager({
   expenses,
   creditCards,
   familyMembers,
+  debts,
   onToggleStatus,
   onPayCreditCardInvoice,
+  onAddDebt,
+  onPayDebtInstallment,
+  onSettleDebt,
+  onDeleteDebt,
 }: PendingDebtsManagerProps) {
-  const [filterType, setFilterType] = useState<"all" | "bills" | "cards">("all");
+  const [filterType, setFilterType] = useState<"all" | "overdue" | "installments" | "bills" | "cards">("all");
   const [selectedMember, setSelectedMember] = useState<string>("all");
 
-  // Pendências de despesas normais (boletos, pix, etc marcados como pendentes)
-  const pendingExpenses = expenses.filter((e) => e.status === "pending");
+  // Modal state for registering overdue or installment debts
+  const [showDebtModal, setShowDebtModal] = useState(false);
+  const [debtMode, setDebtMode] = useState<"overdue" | "installment">("overdue");
+  const [title, setTitle] = useState("");
+  const [creditor, setCreditor] = useState("");
+  const [category, setCategory] = useState<DebtRecord["category"]>("Empréstimo");
+  const [totalAmount, setTotalAmount] = useState("");
+  const [originalAmount, setOriginalAmount] = useState("");
+  const [totalInstallments, setTotalInstallments] = useState("12");
+  const [paidInstallments, setPaidInstallments] = useState("0");
+  const [installmentAmount, setInstallmentAmount] = useState("");
+  const [dueDate, setDueDate] = useState("2026-11-14");
+  const [daysOverdue, setDaysOverdue] = useState("");
+  const [interestRate, setInterestRate] = useState("");
+  const [memberId, setMemberId] = useState(familyMembers[0]?.id || "");
+  const [notes, setNotes] = useState("");
 
-  // Faturas de cartão com saldo utilizado (> 0)
+  const openModalWithMode = (mode: "overdue" | "installment") => {
+    setDebtMode(mode);
+    setCategory(mode === "overdue" ? "Empréstimo" : "Compra Parcelada");
+    setTotalInstallments(mode === "overdue" ? "1" : "12");
+    setPaidInstallments("0");
+    setMemberId(familyMembers[0]?.id || "");
+    setShowDebtModal(true);
+  };
+
+  const handleTotalChange = (val: string) => {
+    setTotalAmount(val);
+    const numTotal = parseFloat(val);
+    const numInst = parseInt(totalInstallments) || 1;
+    if (!isNaN(numTotal) && numInst > 0) {
+      setInstallmentAmount((numTotal / numInst).toFixed(2));
+    }
+  };
+
+  const handleInstallmentsCountChange = (val: string) => {
+    setTotalInstallments(val);
+    const numTotal = parseFloat(totalAmount);
+    const numInst = parseInt(val) || 1;
+    if (!isNaN(numTotal) && numInst > 0) {
+      setInstallmentAmount((numTotal / numInst).toFixed(2));
+    }
+  };
+
+  const handleInstallmentAmountChange = (val: string) => {
+    setInstallmentAmount(val);
+    const numPerInst = parseFloat(val);
+    const numInst = parseInt(totalInstallments) || 1;
+    if (!isNaN(numPerInst) && numInst > 0) {
+      setTotalAmount((numPerInst * numInst).toFixed(2));
+    }
+  };
+
+  const handleCreateDebt = (e: React.FormEvent) => {
+    e.preventDefault();
+    const parsedTotal = parseFloat(totalAmount) || 0;
+    if (!title.trim() || !creditor.trim() || parsedTotal <= 0) return;
+
+    const instCount = debtMode === "installment" ? Math.max(2, parseInt(totalInstallments) || 2) : Math.max(1, parseInt(totalInstallments) || 1);
+    const paidCount = Math.min(instCount - 1, Math.max(0, parseInt(paidInstallments) || 0));
+    const perInst = parseFloat(installmentAmount) || parsedTotal / instCount;
+
+    const newDebt: DebtRecord = {
+      id: `debt-${Date.now()}`,
+      title: title.trim(),
+      creditor: creditor.trim(),
+      debtMode,
+      category,
+      totalAmount: parsedTotal,
+      originalAmount: originalAmount ? parseFloat(originalAmount) : undefined,
+      installmentAmount: perInst,
+      totalInstallments: instCount,
+      paidInstallments: paidCount,
+      dueDate,
+      daysOverdue: debtMode === "overdue" && daysOverdue ? parseInt(daysOverdue) : undefined,
+      interestRate: interestRate ? parseFloat(interestRate) : undefined,
+      memberId: memberId || familyMembers[0]?.id || "",
+      status: debtMode === "overdue" ? "overdue" : "active",
+      notes: notes.trim() || undefined,
+    };
+
+    onAddDebt(newDebt);
+    setShowDebtModal(false);
+    setTitle("");
+    setCreditor("");
+    setTotalAmount("");
+    setOriginalAmount("");
+    setInstallmentAmount("");
+    setDaysOverdue("");
+    setInterestRate("");
+    setNotes("");
+  };
+
+  // Pendências de despesas normais
+  const pendingExpenses = expenses.filter((e) => e.status === "pending");
   const cardsWithBalance = creditCards.filter((c) => c.used > 0);
 
-  // Total das contas normais pendentes
+  // Dívidas cadastradas (endividamento atrasado e parcelamentos)
+  const overdueDebts = debts.filter(
+    (d) =>
+      d.debtMode === "overdue" &&
+      d.status !== "paid" &&
+      (selectedMember === "all" || d.memberId === selectedMember)
+  );
+
+  const installmentDebts = debts.filter(
+    (d) =>
+      d.debtMode === "installment" &&
+      d.status !== "paid" &&
+      (selectedMember === "all" || d.memberId === selectedMember)
+  );
+
+  const paidDebts = debts.filter(
+    (d) => d.status === "paid" && (selectedMember === "all" || d.memberId === selectedMember)
+  );
+
+  const getRemainingDebtAmount = (d: DebtRecord) => {
+    if (d.status === "paid") return 0;
+    if (d.totalInstallments <= 1) return d.totalAmount;
+    const remainingInstallments = Math.max(0, d.totalInstallments - d.paidInstallments);
+    return remainingInstallments * d.installmentAmount;
+  };
+
   const totalPendingExpenses = pendingExpenses.reduce((acc, curr) => acc + curr.amount, 0);
-
-  // Total das faturas de cartão em aberto
   const totalCardInvoices = cardsWithBalance.reduce((acc, curr) => acc + curr.used, 0);
+  const totalOverdueAmount = overdueDebts.reduce((acc, curr) => acc + getRemainingDebtAmount(curr), 0);
+  const totalInstallmentsRemaining = installmentDebts.reduce((acc, curr) => acc + getRemainingDebtAmount(curr), 0);
 
-  // Total consolidado a pagar
-  const totalDebtsToPay = totalPendingExpenses + totalCardInvoices;
+  const totalDebtsToPay =
+    totalPendingExpenses + totalCardInvoices + totalOverdueAmount + totalInstallmentsRemaining;
 
-  // Filtragem de despesas pendentes
   const filteredExpenses = pendingExpenses.filter((e) => {
     if (selectedMember !== "all" && e.memberId !== selectedMember) return false;
     if (filterType === "cards" && e.paymentMethod !== "credit_card") return false;
@@ -59,48 +194,61 @@ export default function PendingDebtsManager({
 
   return (
     <div className="space-y-6">
-      {/* Cabeçalho e Métricas de Débitos a Pagar */}
-      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="p-2 rounded-xl bg-amber-50 text-amber-600">
+      {/* Cabeçalho e Ações de Cadastro */}
+      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <span className="p-2.5 rounded-xl bg-amber-50 text-amber-600">
               <Clock className="w-5 h-5" />
             </span>
             <div>
-              <h3 className="font-bold text-slate-900 text-lg">Débitos e Contas a Pagar</h3>
+              <h3 className="font-bold text-slate-900 text-lg">Débitos, Endividamento e Parcelamentos</h3>
               <p className="text-xs text-slate-500">
-                Acompanhe o que ainda falta quitar este mês entre faturas de cartão e contas pendentes
+                Gerencie contas a pagar, dívidas atrasadas (empréstimos, faturas) e compras ou acordos parcelados
               </p>
             </div>
           </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => openModalWithMode("overdue")}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-rose-600 text-white rounded-xl text-xs sm:text-sm font-semibold hover:bg-rose-700 transition-colors shadow-xs"
+            >
+              <AlertTriangle className="w-4 h-4" />
+              Cadastrar Endividamento (Atrasado)
+            </button>
+            <button
+              onClick={() => openModalWithMode("installment")}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-indigo-600 text-white rounded-xl text-xs sm:text-sm font-semibold hover:bg-indigo-700 transition-colors shadow-xs"
+            >
+              <Plus className="w-4 h-4" />
+              Cadastrar Dívida Parcelada
+            </button>
+          </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-xl border border-slate-200 text-xs">
-            <button
-              onClick={() => setFilterType("all")}
-              className={`px-3 py-1.5 rounded-lg font-medium transition-colors ${
-                filterType === "all" ? "bg-white text-slate-900 shadow-xs font-semibold" : "text-slate-600 hover:text-slate-900"
-              }`}
-            >
-              Todos
-            </button>
-            <button
-              onClick={() => setFilterType("bills")}
-              className={`px-3 py-1.5 rounded-lg font-medium transition-colors ${
-                filterType === "bills" ? "bg-white text-slate-900 shadow-xs font-semibold" : "text-slate-600 hover:text-slate-900"
-              }`}
-            >
-              Boletos / PIX
-            </button>
-            <button
-              onClick={() => setFilterType("cards")}
-              className={`px-3 py-1.5 rounded-lg font-medium transition-colors ${
-                filterType === "cards" ? "bg-white text-slate-900 shadow-xs font-semibold" : "text-slate-600 hover:text-slate-900"
-              }`}
-            >
-              Faturas Cartão
-            </button>
+        {/* Filtros */}
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-slate-100">
+          <div className="flex flex-wrap items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200 text-xs">
+            {[
+              { id: "all", label: "Todos" },
+              { id: "overdue", label: "Em Atraso" },
+              { id: "installments", label: "Parcelamentos" },
+              { id: "cards", label: "Faturas Cartão" },
+              { id: "bills", label: "Boletos / PIX" },
+            ].map((item) => (
+              <button
+                key={item.id}
+                onClick={() => setFilterType(item.id as typeof filterType)}
+                className={`px-3 py-1.5 rounded-lg font-medium transition-colors ${
+                  filterType === item.id
+                    ? "bg-white text-slate-900 shadow-xs font-semibold"
+                    : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                {item.label}
+              </button>
+            ))}
           </div>
 
           <select
@@ -118,66 +266,273 @@ export default function PendingDebtsManager({
         </div>
       </div>
 
-      {/* Cards de Resumo Rápido dos Débitos */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        {/* Total a pagar */}
-        <div className="bg-gradient-to-br from-amber-500 to-rose-600 text-white p-5 rounded-2xl shadow-sm relative overflow-hidden">
+      {/* Cards de Resumo */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="bg-gradient-to-br from-amber-500 to-rose-600 text-white p-5 rounded-2xl shadow-sm">
           <div className="flex items-center justify-between opacity-90 text-xs font-semibold uppercase tracking-wider">
-            <span>Total Pendente a Pagar</span>
+            <span>Passivo Total em Aberto</span>
             <AlertCircle className="w-5 h-5 text-amber-200" />
           </div>
           <div className="mt-3">
-            <h4 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
-              {formatCurrency(totalDebtsToPay)}
-            </h4>
-            <p className="text-xs text-amber-100 mt-1">
-              {pendingExpenses.length} contas pendentes + {cardsWithBalance.length} faturas abertas
+            <h4 className="text-2xl font-extrabold tracking-tight">{formatCurrency(totalDebtsToPay)}</h4>
+            <p className="text-xs text-amber-100 mt-1">Soma geral de tudo que falta quitar</p>
+          </div>
+        </div>
+
+        <div className="bg-white p-5 rounded-2xl border border-rose-200 shadow-xs">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold text-rose-600 uppercase tracking-wider">Dívidas em Atraso</span>
+            <div className="w-8 h-8 rounded-lg bg-rose-50 text-rose-600 flex items-center justify-center">
+              <AlertTriangle className="w-4 h-4" />
+            </div>
+          </div>
+          <div className="mt-3">
+            <h4 className="text-2xl font-bold text-slate-900 tracking-tight">{formatCurrency(totalOverdueAmount)}</h4>
+            <p className="text-xs text-slate-500 mt-1">
+              {overdueDebts.length} {overdueDebts.length === 1 ? "endividamento atrasado" : "endividamentos atrasados"}
             </p>
           </div>
         </div>
 
-        {/* Faturas de Cartão */}
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
-              Faturas de Cartões
-            </span>
+            <span className="text-xs font-semibold text-indigo-600 uppercase tracking-wider">Saldo Parcelado</span>
             <div className="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center">
-              <CardIcon className="w-4 h-4" />
+              <Layers className="w-4 h-4" />
             </div>
           </div>
           <div className="mt-3">
             <h4 className="text-2xl font-bold text-slate-900 tracking-tight">
-              {formatCurrency(totalCardInvoices)}
+              {formatCurrency(totalInstallmentsRemaining)}
             </h4>
-            <p className="text-xs text-slate-500 mt-1">
-              {cardsWithBalance.length} {cardsWithBalance.length === 1 ? "cartão com saldo devedor" : "cartões com saldo devedor"}
-            </p>
+            <p className="text-xs text-slate-500 mt-1">{installmentDebts.length} parcelamentos ativos</p>
           </div>
         </div>
 
-        {/* Boletos e Despesas Variadas */}
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
-              Contas e Boletos Pendentes
-            </span>
-            <div className="w-8 h-8 rounded-lg bg-rose-50 text-rose-600 flex items-center justify-center">
+            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Faturas & Contas</span>
+            <div className="w-8 h-8 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center">
               <CalendarClock className="w-4 h-4" />
             </div>
           </div>
           <div className="mt-3">
             <h4 className="text-2xl font-bold text-slate-900 tracking-tight">
-              {formatCurrency(totalPendingExpenses)}
+              {formatCurrency(totalCardInvoices + totalPendingExpenses)}
             </h4>
             <p className="text-xs text-slate-500 mt-1">
-              Despesas aguardando quitação manual
+              {cardsWithBalance.length} faturas + {pendingExpenses.length} contas
             </p>
           </div>
         </div>
       </div>
 
-      {/* Seção 1: Faturas de Cartão de Crédito a Pagar */}
+      {/* Seção: Endividamento / Dívidas Atrasadas */}
+      {(filterType === "all" || filterType === "overdue") && (
+        <div className="bg-white rounded-2xl border border-rose-200 shadow-xs overflow-hidden">
+          <div className="p-5 border-b border-rose-100 bg-rose-50/40 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h4 className="font-bold text-slate-900 text-base flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-rose-600" />
+                Endividamento & Dívidas Atrasadas
+              </h4>
+              <p className="text-xs text-slate-500">
+                Empréstimos atrasados, faturas vencidas e pendências acumulando juros
+              </p>
+            </div>
+            <span className="text-xs font-semibold px-2.5 py-1 bg-rose-100 text-rose-700 rounded-full">
+              {overdueDebts.length} em atraso
+            </span>
+          </div>
+
+          {overdueDebts.length === 0 ? (
+            <div className="p-8 text-center text-slate-400 text-sm">
+              <CheckCircle2 className="w-8 h-8 text-emerald-500 mx-auto mb-2" />
+              Nenhuma dívida em atraso cadastrada!
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-5">
+              {overdueDebts.map((debt) => {
+                const member = familyMembers.find((m) => m.id === debt.memberId);
+                return (
+                  <div
+                    key={debt.id}
+                    className="p-4 rounded-xl border border-rose-200 bg-rose-50/20 flex flex-col justify-between space-y-3"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <div className="flex flex-wrap items-center gap-1.5 mb-1">
+                          <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-rose-100 text-rose-700">
+                            {debt.category}
+                          </span>
+                          {debt.daysOverdue ? (
+                            <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">
+                              {debt.daysOverdue} dias em atraso
+                            </span>
+                          ) : null}
+                        </div>
+                        <h5 className="font-bold text-slate-900 text-base">{debt.title}</h5>
+                        <p className="text-xs text-slate-500">
+                          Credor: <strong className="text-slate-700">{debt.creditor}</strong> • Venc.: {formatDate(debt.dueDate)}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => onDeleteDebt(debt.id)}
+                        className="p-1 text-slate-400 hover:text-rose-600 rounded-lg transition-colors"
+                        title="Excluir registro"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 pt-2 border-t border-rose-100 text-xs">
+                      <div>
+                        <span className="text-slate-500 block">Valor Atualizado</span>
+                        <span className="text-lg font-extrabold text-rose-600">{formatCurrency(debt.totalAmount)}</span>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-slate-500 block">Responsável</span>
+                        <span className="font-medium text-slate-800">
+                          {member?.avatar || "👤"} {member?.name || "Família"}
+                        </span>
+                        {debt.interestRate ? (
+                          <span className="block text-[11px] text-rose-600">Juros: {debt.interestRate}% a.m.</span>
+                        ) : null}
+                      </div>
+                    </div>
+
+                    {debt.notes && (
+                      <p className="text-xs text-slate-500 bg-white p-2 rounded-lg border border-slate-100">
+                        {debt.notes}
+                      </p>
+                    )}
+
+                    <button
+                      onClick={() => onSettleDebt(debt.id)}
+                      className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 bg-emerald-600 text-white rounded-xl text-xs font-semibold hover:bg-emerald-700 transition-colors shadow-xs"
+                    >
+                      <Check className="w-3.5 h-3.5" />
+                      Quitar Dívida Atrasada
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Seção: Dívidas com Parcelamento */}
+      {(filterType === "all" || filterType === "installments") && (
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+          <div className="p-5 border-b border-slate-100 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h4 className="font-bold text-slate-900 text-base flex items-center gap-2">
+                <Layers className="w-4 h-4 text-indigo-600" />
+                Dívidas com Parcelamento
+              </h4>
+              <p className="text-xs text-slate-500">
+                Acompanhe parcela por parcela e dê baixa conforme os pagamentos avançam
+              </p>
+            </div>
+            <span className="text-xs font-semibold px-2.5 py-1 bg-indigo-50 text-indigo-700 rounded-full">
+              {installmentDebts.length} em andamento
+            </span>
+          </div>
+
+          {installmentDebts.length === 0 ? (
+            <div className="p-8 text-center text-slate-400 text-sm">
+              <CheckCircle2 className="w-8 h-8 text-emerald-500 mx-auto mb-2" />
+              Nenhuma dívida parcelada em aberto!
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-5">
+              {installmentDebts.map((debt) => {
+                const member = familyMembers.find((m) => m.id === debt.memberId);
+                const remaining = getRemainingDebtAmount(debt);
+                const progress = (debt.paidInstallments / (debt.totalInstallments || 1)) * 100;
+                const nextInstallmentNumber = debt.paidInstallments + 1;
+
+                return (
+                  <div
+                    key={debt.id}
+                    className="p-4 rounded-xl border border-slate-200 bg-slate-50/40 flex flex-col justify-between space-y-3"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <div className="flex flex-wrap items-center gap-1.5 mb-1">
+                          <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700">
+                            {debt.category}
+                          </span>
+                          <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-slate-200 text-slate-700">
+                            Parcela {nextInstallmentNumber}/{debt.totalInstallments}
+                          </span>
+                        </div>
+                        <h5 className="font-bold text-slate-900 text-base">{debt.title}</h5>
+                        <p className="text-xs text-slate-500">
+                          Credor: <strong className="text-slate-700">{debt.creditor}</strong> • Próx. Venc.: {formatDate(debt.dueDate)}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => onDeleteDebt(debt.id)}
+                        className="p-1 text-slate-400 hover:text-rose-600 rounded-lg transition-colors"
+                        title="Excluir parcelamento"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    <div className="space-y-2 pt-2 border-t border-slate-200 text-xs">
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">
+                          Valor da Parcela: <strong className="text-slate-900">{formatCurrency(debt.installmentAmount)}</strong>
+                        </span>
+                        <span className="text-slate-500">
+                          Restante: <strong className="text-rose-600">{formatCurrency(remaining)}</strong>
+                        </span>
+                      </div>
+
+                      <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
+                        <div
+                          className="h-2 rounded-full bg-indigo-600 transition-all"
+                          style={{ width: `${Math.min(progress, 100)}%` }}
+                        />
+                      </div>
+
+                      <div className="flex justify-between text-[11px] text-slate-500">
+                        <span>
+                          {debt.paidInstallments} de {debt.totalInstallments} pagas ({progress.toFixed(0)}%)
+                        </span>
+                        <span>
+                          {member?.avatar || "👤"} {member?.name || "Família"}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex gap-2 pt-1">
+                      <button
+                        onClick={() => onPayDebtInstallment(debt.id)}
+                        className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 bg-indigo-600 text-white rounded-xl text-xs font-semibold hover:bg-indigo-700 transition-colors shadow-xs"
+                      >
+                        <Check className="w-3.5 h-3.5" />
+                        Pagar Parcela {nextInstallmentNumber}/{debt.totalInstallments}
+                      </button>
+                      <button
+                        onClick={() => onSettleDebt(debt.id)}
+                        className="px-3 py-2 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-xl text-xs font-semibold hover:bg-emerald-100 transition-colors"
+                      >
+                        Quitar Tudo
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Seção: Faturas de Cartão de Crédito a Pagar */}
       {(filterType === "all" || filterType === "cards") && (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
           <div className="p-5 border-b border-slate-100 flex items-center justify-between">
@@ -193,7 +548,7 @@ export default function PendingDebtsManager({
           {cardsWithBalance.length === 0 ? (
             <div className="p-8 text-center text-slate-400 text-sm">
               <CheckCircle2 className="w-8 h-8 text-emerald-500 mx-auto mb-2" />
-              Nenhum cartão com fatura em aberto! Parabéns, todas as faturas estão zeradas.
+              Nenhum cartão com fatura em aberto! Todas as faturas estão zeradas.
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 p-5">
@@ -260,7 +615,7 @@ export default function PendingDebtsManager({
         </div>
       )}
 
-      {/* Seção 2: Contas e Despesas Individuais Pendentes */}
+      {/* Seção: Contas e Despesas Individuais Pendentes */}
       {(filterType === "all" || filterType === "bills") && (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
           <div className="p-5 border-b border-slate-100 flex items-center justify-between">
@@ -324,9 +679,7 @@ export default function PendingDebtsManager({
                             {member?.name || "Família"}
                           </span>
                         </td>
-                        <td className="px-6 py-4 text-xs text-slate-600">
-                          {formatDate(expense.date)}
-                        </td>
+                        <td className="px-6 py-4 text-xs text-slate-600">{formatDate(expense.date)}</td>
                         <td className="px-6 py-4 text-right font-bold text-rose-600 text-base">
                           {formatCurrency(expense.amount)}
                         </td>
@@ -347,6 +700,307 @@ export default function PendingDebtsManager({
               </table>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Histórico de Dívidas Quitadas */}
+      {paidDebts.length > 0 && filterType === "all" && (
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-5">
+          <div className="flex items-center justify-between mb-3">
+            <h4 className="font-bold text-slate-800 text-sm flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+              Dívidas e Parcelamentos Quitados ({paidDebts.length})
+            </h4>
+          </div>
+          <div className="divide-y divide-slate-100">
+            {paidDebts.map((debt) => (
+              <div key={debt.id} className="py-2.5 flex items-center justify-between text-xs">
+                <div>
+                  <span className="font-semibold text-slate-700 line-through">{debt.title}</span>
+                  <span className="text-slate-400 ml-2">({debt.creditor})</span>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="text-emerald-600 font-semibold">{formatCurrency(debt.totalAmount)}</span>
+                  <button
+                    onClick={() => onDeleteDebt(debt.id)}
+                    className="text-slate-400 hover:text-rose-600 p-1"
+                    title="Remover do histórico"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Cadastro de Endividamento / Dívida Parcelada */}
+      {showDebtModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-xs p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl p-6 max-w-lg w-full shadow-xl border border-slate-200 my-8">
+            <h3 className="text-lg font-bold text-slate-900 mb-3">
+              {debtMode === "overdue" ? "Cadastrar Endividamento (Dívida Atrasada)" : "Cadastrar Dívida com Parcelamento"}
+            </h3>
+
+            {/* Toggle de Tipo */}
+            <div className="grid grid-cols-2 gap-2 mb-4">
+              <button
+                type="button"
+                onClick={() => {
+                  setDebtMode("overdue");
+                  setTotalInstallments("1");
+                }}
+                className={`px-3 py-2 rounded-xl text-xs font-semibold border transition-all ${
+                  debtMode === "overdue"
+                    ? "bg-rose-50 border-rose-500 text-rose-700"
+                    : "border-slate-200 text-slate-600 hover:bg-slate-50"
+                }`}
+              >
+                Dívida Atrasada / Endividamento
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setDebtMode("installment");
+                  if (parseInt(totalInstallments) <= 1) setTotalInstallments("12");
+                }}
+                className={`px-3 py-2 rounded-xl text-xs font-semibold border transition-all ${
+                  debtMode === "installment"
+                    ? "bg-indigo-50 border-indigo-500 text-indigo-700"
+                    : "border-slate-200 text-slate-600 hover:bg-slate-50"
+                }`}
+              >
+                Dívida com Parcelamento
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateDebt} className="space-y-3.5">
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Descrição da Dívida</label>
+                <input
+                  type="text"
+                  required
+                  placeholder={
+                    debtMode === "overdue"
+                      ? "Ex: Fatura Nubank Atrasada, Empréstimo Santander..."
+                      : "Ex: Acordo Cartão, Financiamento Moto, Parcelamento..."
+                  }
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Credor / Banco / Loja</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Ex: Itaú, Nubank, Loja..."
+                    value={creditor}
+                    onChange={(e) => setCreditor(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Tipo / Categoria</label>
+                  <select
+                    value={category}
+                    onChange={(e) => setCategory(e.target.value as DebtRecord["category"])}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                  >
+                    {DEBT_CATEGORIES.map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {debtMode === "overdue" ? (
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-600 mb-1">
+                        Valor Atualizado (R$)
+                      </label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0.01"
+                        required
+                        placeholder="0,00"
+                        value={totalAmount}
+                        onChange={(e) => setTotalAmount(e.target.value)}
+                        className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-rose-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-600 mb-1">
+                        Valor Original (Opcional)
+                      </label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        placeholder="0,00"
+                        value={originalAmount}
+                        onChange={(e) => setOriginalAmount(e.target.value)}
+                        className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-rose-500"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-600 mb-1">Vencimento Orig.</label>
+                      <input
+                        type="date"
+                        value={dueDate}
+                        onChange={(e) => setDueDate(e.target.value)}
+                        className="w-full px-2.5 py-2 border border-slate-200 rounded-xl text-xs outline-none focus:ring-2 focus:ring-rose-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-600 mb-1">Dias em Atraso</label>
+                      <input
+                        type="number"
+                        min="1"
+                        placeholder="Ex: 45"
+                        value={daysOverdue}
+                        onChange={(e) => setDaysOverdue(e.target.value)}
+                        className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-rose-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-600 mb-1">Juros (% a.m.)</label>
+                      <input
+                        type="number"
+                        step="0.1"
+                        placeholder="Ex: 8.5"
+                        value={interestRate}
+                        onChange={(e) => setInterestRate(e.target.value)}
+                        className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-rose-500"
+                      />
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-600 mb-1">Valor Total (R$)</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0.01"
+                        required
+                        placeholder="Ex: 3600,00"
+                        value={totalAmount}
+                        onChange={(e) => handleTotalChange(e.target.value)}
+                        className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-600 mb-1">Valor da Parcela (R$)</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0.01"
+                        required
+                        placeholder="Ex: 300,00"
+                        value={installmentAmount}
+                        onChange={(e) => handleInstallmentAmountChange(e.target.value)}
+                        className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-600 mb-1">Nº de Parcelas</label>
+                      <input
+                        type="number"
+                        min="2"
+                        max="360"
+                        required
+                        value={totalInstallments}
+                        onChange={(e) => handleInstallmentsCountChange(e.target.value)}
+                        className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-600 mb-1">Já Pagas</label>
+                      <input
+                        type="number"
+                        min="0"
+                        max={Math.max(0, (parseInt(totalInstallments) || 2) - 1)}
+                        value={paidInstallments}
+                        onChange={(e) => setPaidInstallments(e.target.value)}
+                        className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-600 mb-1">Próx. Vencimento</label>
+                      <input
+                        type="date"
+                        value={dueDate}
+                        onChange={(e) => setDueDate(e.target.value)}
+                        className="w-full px-2.5 py-2 border border-slate-200 rounded-xl text-xs outline-none focus:ring-2 focus:ring-indigo-500"
+                      />
+                    </div>
+                  </div>
+                </>
+              )}
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Membro Responsável</label>
+                  <select
+                    value={memberId}
+                    onChange={(e) => setMemberId(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                  >
+                    {familyMembers.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Observações (Opcional)</label>
+                  <input
+                    type="text"
+                    placeholder="Ex: Acordo feito em 10x..."
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3">
+                <button
+                  type="button"
+                  onClick={() => setShowDebtModal(false)}
+                  className="px-4 py-2 border border-slate-200 text-slate-600 text-xs sm:text-sm rounded-xl font-medium hover:bg-slate-50 transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className={`px-4 py-2 text-white text-xs sm:text-sm rounded-xl font-semibold transition-colors shadow-xs ${
+                    debtMode === "overdue" ? "bg-rose-600 hover:bg-rose-700" : "bg-indigo-600 hover:bg-indigo-700"
+                  }`}
+                >
+                  {debtMode === "overdue" ? "Salvar Endividamento" : "Salvar Parcelamento"}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </div>

@@ -21,12 +21,13 @@ import {
   initialExpenses,
   initialBudgetCategories,
   initialGoals,
+  initialDebts,
 } from "@/lib/initial-data";
-import { Expense, Income, BudgetCategory, CreditCard, FinancialGoal, FamilyMember } from "@/lib/types";
+import { Expense, Income, BudgetCategory, CreditCard, FinancialGoal, FamilyMember, DebtRecord } from "@/lib/types";
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState("dashboard");
-  const [month, setMonth] = useState("2026-08");
+  const [month, setMonth] = useState("2026-11");
 
   // App State
   const [familyMembers, setFamilyMembers] = useState<FamilyMember[]>(initialFamilyMembers);
@@ -35,6 +36,7 @@ export default function Home() {
   const [expenses, setExpenses] = useState<Expense[]>(initialExpenses);
   const [budgets, setBudgets] = useState<BudgetCategory[]>(initialBudgetCategories);
   const [goals, setGoals] = useState<FinancialGoal[]>(initialGoals);
+  const [debts, setDebts] = useState<DebtRecord[]>(initialDebts);
 
   // Calculations
   const totalIncome = incomes.reduce((acc, curr) => acc + curr.amount, 0);
@@ -42,12 +44,18 @@ export default function Home() {
   const balance = totalIncome - totalExpense;
   const savingsRate = totalIncome > 0 ? ((totalIncome - totalExpense) / totalIncome) * 100 : 0;
 
-  // Débitos a Pagar
+  // Débitos a Pagar & Endividamentos
   const pendingExpenses = expenses.filter((e) => e.status === "pending");
   const pendingExpensesAmount = pendingExpenses.reduce((acc, curr) => acc + curr.amount, 0);
   const creditCardsUsedAmount = creditCards.reduce((acc, curr) => acc + curr.used, 0);
-  const totalPendingDebts = pendingExpensesAmount + creditCardsUsedAmount;
-  const pendingDebtsCount = pendingExpenses.length + creditCards.filter((c) => c.used > 0).length;
+  const activeDebts = debts.filter((d) => d.status !== "paid");
+  const activeDebtsAmount = activeDebts.reduce((acc, d) => {
+    if (d.totalInstallments <= 1) return acc + d.totalAmount;
+    return acc + Math.max(0, d.totalInstallments - d.paidInstallments) * d.installmentAmount;
+  }, 0);
+  const totalPendingDebts = pendingExpensesAmount + creditCardsUsedAmount + activeDebtsAmount;
+  const pendingDebtsCount =
+    pendingExpenses.length + creditCards.filter((c) => c.used > 0).length + activeDebts.length;
 
   // Handlers
   const handleAddExpense = (newExpense: Expense) => {
@@ -145,6 +153,45 @@ export default function Home() {
     setFamilyMembers((prev) => [...prev, newMember]);
   };
 
+  const handleDeleteMember = (id: string) => {
+    const remaining = familyMembers.filter((m) => m.id !== id);
+    const fallbackId = remaining[0]?.id || "";
+    setFamilyMembers(remaining);
+    setExpenses((exps) => exps.map((e) => (e.memberId === id ? { ...e, memberId: fallbackId } : e)));
+    setIncomes((incs) => incs.map((i) => (i.memberId === id ? { ...i, memberId: fallbackId } : i)));
+    setDebts((ds) => ds.map((d) => (d.memberId === id ? { ...d, memberId: fallbackId } : d)));
+  };
+
+  const handleAddDebt = (newDebt: DebtRecord) => {
+    setDebts((prev) => [newDebt, ...prev]);
+  };
+
+  const handlePayDebtInstallment = (id: string) => {
+    setDebts((prev) =>
+      prev.map((d) => {
+        if (d.id !== id) return d;
+        const nextPaid = Math.min(d.totalInstallments, d.paidInstallments + 1);
+        return {
+          ...d,
+          paidInstallments: nextPaid,
+          status: nextPaid >= d.totalInstallments ? "paid" : d.status,
+        };
+      })
+    );
+  };
+
+  const handleSettleDebt = (id: string) => {
+    setDebts((prev) =>
+      prev.map((d) =>
+        d.id === id ? { ...d, paidInstallments: d.totalInstallments, status: "paid" } : d
+      )
+    );
+  };
+
+  const handleDeleteDebt = (id: string) => {
+    setDebts((prev) => prev.filter((d) => d.id !== id));
+  };
+
   return (
     <div className="min-h-screen flex flex-col bg-slate-50 text-slate-900">
       <Navbar
@@ -179,6 +226,7 @@ export default function Home() {
                 expenses={expenses.slice(0, 5)}
                 familyMembers={familyMembers}
                 creditCards={creditCards}
+                budgetCategories={budgets.map((b) => b.category)}
                 onAddExpense={handleAddExpense}
                 onDeleteExpense={handleDeleteExpense}
                 onToggleStatus={handleToggleExpenseStatus}
@@ -198,8 +246,13 @@ export default function Home() {
             expenses={expenses}
             creditCards={creditCards}
             familyMembers={familyMembers}
+            debts={debts}
             onToggleStatus={handleToggleExpenseStatus}
             onPayCreditCardInvoice={handlePayCreditCardInvoice}
+            onAddDebt={handleAddDebt}
+            onPayDebtInstallment={handlePayDebtInstallment}
+            onSettleDebt={handleSettleDebt}
+            onDeleteDebt={handleDeleteDebt}
           />
         )}
 
@@ -208,6 +261,7 @@ export default function Home() {
             expenses={expenses}
             familyMembers={familyMembers}
             creditCards={creditCards}
+            budgetCategories={budgets.map((b) => b.category)}
             onAddExpense={handleAddExpense}
             onDeleteExpense={handleDeleteExpense}
             onToggleStatus={handleToggleExpenseStatus}
@@ -249,6 +303,7 @@ export default function Home() {
             expenses={expenses}
             incomes={incomes}
             onAddMember={handleAddMember}
+            onDeleteMember={handleDeleteMember}
           />
         )}
 
@@ -266,7 +321,7 @@ export default function Home() {
 
       <footer className="bg-white border-t border-slate-200 py-4 mt-8">
         <div className="max-w-7xl mx-auto px-4 text-center text-xs text-slate-500">
-          FinFam AI &copy; 2026 - Gestão Financeira Familiar Inteligente
+          WillBank &copy; 2026 - Gestão Financeira Familiar Inteligente
         </div>
       </footer>
     </div>

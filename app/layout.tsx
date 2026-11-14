@@ -2,8 +2,13 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "FinFam AI - Gestão Financeira Familiar",
-  description: "Controle financeiro inteligente, orçamentos, metas e investimentos da família.",
+  title: "WillBank - Gestão Financeira Familiar",
+  description: "WillBank: Controle financeiro inteligente, endividamento, orçamentos, metas e investimentos da família.",
+  icons: {
+    icon: "/willbank-logo.jpg",
+    shortcut: "/willbank-logo.jpg",
+    apple: "/willbank-logo.jpg",
+  },
 };
 
 export default function RootLayout({
