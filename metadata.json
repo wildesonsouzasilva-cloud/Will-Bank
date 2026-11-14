@@ -1,0 +1,6 @@
+{
+  "name": "FinFam AI - Gestão Financeira Familiar",
+  "description": "Plataforma inteligente de planejamento, controle financeiro familiar, orçamentos, cartões e investimentos com assistente de IA.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
