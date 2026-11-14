@@ -23,3 +23,74 @@ export function formatDate(dateString: string): string {
   }
   return dateString;
 }
+
+const MONTH_NAMES_PT = [
+  "Janeiro",
+  "Fevereiro",
+  "Março",
+  "Abril",
+  "Maio",
+  "Junho",
+  "Julho",
+  "Agosto",
+  "Setembro",
+  "Outubro",
+  "Novembro",
+  "Dezembro",
+];
+
+const MONTH_SHORT_PT = [
+  "Jan",
+  "Fev",
+  "Mar",
+  "Abr",
+  "Mai",
+  "Jun",
+  "Jul",
+  "Ago",
+  "Set",
+  "Out",
+  "Nov",
+  "Dez",
+];
+
+export function addMonthsIso(isoDate: string, monthOffset: number): string {
+  const parts = (isoDate || "").split("-");
+  if (parts.length !== 3) return isoDate;
+  const year = parseInt(parts[0], 10);
+  const month = parseInt(parts[1], 10);
+  const day = parseInt(parts[2], 10);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) {
+    return isoDate;
+  }
+
+  const totalMonths = year * 12 + (month - 1) + monthOffset;
+  const targetYear = Math.floor(totalMonths / 12);
+  const targetMonthIndex = ((totalMonths % 12) + 12) % 12;
+  const targetMonth = targetMonthIndex + 1;
+
+  const isLeap = (targetYear % 4 === 0 && targetYear % 100 !== 0) || targetYear % 400 === 0;
+  const daysInMonth = [31, isLeap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][targetMonthIndex];
+  const clampedDay = Math.min(Math.max(1, day), daysInMonth);
+
+  const mm = String(targetMonth).padStart(2, "0");
+  const dd = String(clampedDay).padStart(2, "0");
+  return `${targetYear}-${mm}-${dd}`;
+}
+
+export function getYearMonthKey(isoDate: string): string {
+  if (!isoDate || isoDate.length < 7) return "";
+  return isoDate.slice(0, 7);
+}
+
+export function formatMonthYearPt(yearMonthOrDate: string, short = false): string {
+  const ym = getYearMonthKey(yearMonthOrDate);
+  const parts = ym.split("-");
+  if (parts.length !== 2) return yearMonthOrDate;
+  const year = parts[0];
+  const monthIdx = parseInt(parts[1], 10) - 1;
+  if (monthIdx < 0 || monthIdx > 11) return yearMonthOrDate;
+  const label = short ? MONTH_SHORT_PT[monthIdx] : MONTH_NAMES_PT[monthIdx];
+  return `${label}/${year}`;
+}
+

@@ -17,6 +17,7 @@ import {
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { handleFirestoreError, OperationType } from "@/lib/firestore-error";
+import { addMonthsIso } from "@/lib/utils";
 import {
   FamilyMember,
   CreditCard,
@@ -661,6 +662,47 @@ export async function addExpenseInCloud(
   }
 }
 
+export async function addExpensesBatchInCloud(
+  uid: string,
+  newExpenses: Expense[],
+  matchingBudget?: BudgetCategory,
+  matchingCard?: CreditCard
+): Promise<void> {
+  if (newExpenses.length === 0) return;
+
+  const ops = newExpenses.map((exp) => {
+    const { id, data } = toExpenseDoc(exp, uid);
+    return { ref: doc(db, "users", uid, "expenses", id), data };
+  });
+  await commitBatchedWrites(ops, `users/${uid}/expenses`);
+
+  const totalAmount = newExpenses.reduce((acc, item) => acc + item.amount, 0);
+
+  if (matchingBudget) {
+    const budgetPath = `users/${uid}/budgets/${matchingBudget.id}`;
+    try {
+      await updateDoc(doc(db, "users", uid, "budgets", matchingBudget.id), {
+        spent: clampNum(matchingBudget.spent + totalAmount, 0),
+        updatedAt: serverTimestamp(),
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, budgetPath);
+    }
+  }
+
+  if (newExpenses[0]?.paymentMethod === "credit_card" && matchingCard) {
+    const cardPath = `users/${uid}/creditCards/${matchingCard.id}`;
+    try {
+      await updateDoc(doc(db, "users", uid, "creditCards", matchingCard.id), {
+        used: clampNum(matchingCard.used + totalAmount, 0),
+        updatedAt: serverTimestamp(),
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, cardPath);
+    }
+  }
+}
+
 export async function deleteExpenseInCloud(
   uid: string,
   expense: Expense,
@@ -981,11 +1023,14 @@ export async function payDebtInstallmentInCloud(uid: string, debt: DebtRecord): 
   if (debt.status === "paid") return;
   const nextPaid = Math.min(debt.totalInstallments, debt.paidInstallments + 1);
   const nextStatus: DebtRecord["status"] = nextPaid >= debt.totalInstallments ? "paid" : debt.status;
+  const nextDueDate =
+    nextPaid < debt.totalInstallments ? addMonthsIso(debt.dueDate, 1) : debt.dueDate;
   const path = `users/${uid}/debts/${debt.id}`;
   try {
     await updateDoc(doc(db, "users", uid, "debts", debt.id), {
       paidInstallments: nextPaid,
       status: nextStatus,
+      dueDate: nextDueDate,
       updatedAt: serverTimestamp(),
     });
   } catch (error) {

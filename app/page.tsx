@@ -19,11 +19,13 @@ import FinFamAiAssistant from "@/components/FinFamAiAssistant";
 import PendingDebtsManager from "@/components/PendingDebtsManager";
 
 import { auth, googleProvider, testFirestoreConnection } from "@/lib/firebase";
+import { addMonthsIso } from "@/lib/utils";
 import {
   ensureWorkspaceInitialized,
   subscribeToWorkspace,
   updateReferenceMonth,
   addExpenseInCloud,
+  addExpensesBatchInCloud,
   deleteExpenseInCloud,
   toggleExpenseStatusInCloud,
   payCreditCardInvoiceInCloud,
@@ -270,6 +272,40 @@ export default function Home() {
     );
   };
 
+  const handleAddExpensesBatch = (newExpenses: Expense[]) => {
+    if (newExpenses.length === 0) return;
+    const first = newExpenses[0];
+    const totalAmount = newExpenses.reduce((acc, item) => acc + item.amount, 0);
+
+    const matchingBudget = budgets.find(
+      (b) => b.category.toLowerCase() === first.category.toLowerCase()
+    );
+    const matchingCard =
+      first.paymentMethod === "credit_card" && first.cardId
+        ? creditCards.find((c) => c.id === first.cardId)
+        : undefined;
+
+    setExpenses((prev) => [...newExpenses, ...prev]);
+    if (matchingBudget) {
+      setBudgets((prev) =>
+        prev.map((b) =>
+          b.id === matchingBudget.id ? { ...b, spent: b.spent + totalAmount } : b
+        )
+      );
+    }
+    if (matchingCard) {
+      setCreditCards((prev) =>
+        prev.map((c) =>
+          c.id === matchingCard.id ? { ...c, used: c.used + totalAmount } : c
+        )
+      );
+    }
+
+    void runCloudAction(() =>
+      addExpensesBatchInCloud(user.uid, newExpenses, matchingBudget, matchingCard)
+    );
+  };
+
   const handleDeleteExpense = (id: string) => {
     const exp = expenses.find((e) => e.id === id);
     if (!exp) return;
@@ -415,10 +451,13 @@ export default function Home() {
       prev.map((d) => {
         if (d.id !== id) return d;
         const nextPaid = Math.min(d.totalInstallments, d.paidInstallments + 1);
+        const nextDueDate =
+          nextPaid < d.totalInstallments ? addMonthsIso(d.dueDate, 1) : d.dueDate;
         return {
           ...d,
           paidInstallments: nextPaid,
           status: nextPaid >= d.totalInstallments ? "paid" : d.status,
+          dueDate: nextDueDate,
         };
       })
     );
@@ -515,6 +554,7 @@ export default function Home() {
                 creditCards={creditCards}
                 budgetCategories={budgets.map((b) => b.category)}
                 onAddExpense={handleAddExpense}
+                onAddExpenses={handleAddExpensesBatch}
                 onDeleteExpense={handleDeleteExpense}
                 onToggleStatus={handleToggleExpenseStatus}
               />
@@ -534,6 +574,7 @@ export default function Home() {
             creditCards={creditCards}
             familyMembers={familyMembers}
             debts={debts}
+            referenceMonth={month}
             onToggleStatus={handleToggleExpenseStatus}
             onPayCreditCardInvoice={handlePayCreditCardInvoice}
             onAddDebt={handleAddDebt}
@@ -550,6 +591,7 @@ export default function Home() {
             creditCards={creditCards}
             budgetCategories={budgets.map((b) => b.category)}
             onAddExpense={handleAddExpense}
+            onAddExpenses={handleAddExpensesBatch}
             onDeleteExpense={handleDeleteExpense}
             onToggleStatus={handleToggleExpenseStatus}
           />

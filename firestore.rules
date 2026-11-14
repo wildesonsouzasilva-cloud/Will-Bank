@@ -390,6 +390,7 @@ service cloud.firestore {
           parentOwnedByUser(userId) &&
           (
             incoming().diff(existing()).affectedKeys().hasOnly(['paidInstallments', 'status', 'updatedAt']) ||
+            incoming().diff(existing()).affectedKeys().hasOnly(['paidInstallments', 'status', 'dueDate', 'updatedAt']) ||
             incoming().diff(existing()).affectedKeys().hasOnly(['memberId', 'updatedAt'])
           );
         allow delete: if isVerifiedOwner(userId) && isValidId(userId) && isValidId(debtId) && parentOwnedByUser(userId);

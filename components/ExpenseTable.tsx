@@ -2,7 +2,7 @@
 
 import React, { useState } from "react";
 import { Expense, FamilyMember, CreditCard } from "@/lib/types";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency, formatDate, addMonthsIso, formatMonthYearPt } from "@/lib/utils";
 import { Plus, Trash2, CreditCard as CardIcon, DollarSign, Tag, Calendar, User } from "lucide-react";
 
 interface ExpenseTableProps {
@@ -11,6 +11,7 @@ interface ExpenseTableProps {
   creditCards: CreditCard[];
   budgetCategories?: string[];
   onAddExpense: (expense: Expense) => void;
+  onAddExpenses?: (expenses: Expense[]) => void;
   onDeleteExpense: (id: string) => void;
   onToggleStatus?: (id: string) => void;
 }
@@ -21,6 +22,7 @@ export default function ExpenseTable({
   creditCards,
   budgetCategories = [],
   onAddExpense,
+  onAddExpenses,
   onDeleteExpense,
   onToggleStatus,
 }: ExpenseTableProps) {
@@ -33,7 +35,8 @@ export default function ExpenseTable({
   const [paymentMethod, setPaymentMethod] = useState<Expense["paymentMethod"]>("pix");
   const [cardId, setCardId] = useState(creditCards[0]?.id || "");
   const [status, setStatus] = useState<Expense["status"]>("paid");
-  const [installments, setInstallments] = useState("1");
+  const [isInstallment, setIsInstallment] = useState(false);
+  const [installments, setInstallments] = useState("2");
 
   const validMemberId = familyMembers.some((m) => m.id === memberId)
     ? memberId
@@ -42,32 +45,61 @@ export default function ExpenseTable({
     ? cardId
     : creditCards[0]?.id || "";
 
+  const parsedTotalAmount = parseFloat(amount) || 0;
+  const parsedInstallments = isInstallment
+    ? Math.min(120, Math.max(2, parseInt(installments, 10) || 2))
+    : 1;
+  const installmentValue = parsedTotalAmount > 0 ? parsedTotalAmount / parsedInstallments : 0;
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!description || !amount) return;
+    if (!description || !amount || parsedTotalAmount <= 0) return;
 
-    const totalInstallments = Math.max(1, parseInt(installments) || 1);
+    const totalInstallments = parsedInstallments;
+    const baseTimestamp = Date.now();
 
-    const newExpense: Expense = {
-      id: `exp-${Date.now()}`,
-      description,
-      amount: parseFloat(amount),
-      date,
-      category,
-      memberId: validMemberId,
-      paymentMethod,
-      cardId: paymentMethod === "credit_card" ? validCardId : undefined,
-      installments: totalInstallments > 1 ? totalInstallments : undefined,
-      currentInstallment: totalInstallments > 1 ? 1 : undefined,
-      status,
-    };
+    if (totalInstallments > 1 && onAddExpenses) {
+      const perInstallment = Number((parsedTotalAmount / totalInstallments).toFixed(2));
+      const generated: Expense[] = Array.from({ length: totalInstallments }, (_, idx) => {
+        const current = idx + 1;
+        return {
+          id: `exp-${baseTimestamp}-${current}`,
+          description: `${description.trim()} (${current}/${totalInstallments})`,
+          amount: perInstallment,
+          date: addMonthsIso(date, idx),
+          category,
+          memberId: validMemberId,
+          paymentMethod,
+          cardId: paymentMethod === "credit_card" ? validCardId : undefined,
+          installments: totalInstallments,
+          currentInstallment: current,
+          status: current === 1 ? status : "pending",
+        };
+      });
+      onAddExpenses(generated);
+    } else {
+      const newExpense: Expense = {
+        id: `exp-${baseTimestamp}`,
+        description: description.trim(),
+        amount: parsedTotalAmount,
+        date,
+        category,
+        memberId: validMemberId,
+        paymentMethod,
+        cardId: paymentMethod === "credit_card" ? validCardId : undefined,
+        installments: totalInstallments > 1 ? totalInstallments : undefined,
+        currentInstallment: totalInstallments > 1 ? 1 : undefined,
+        status,
+      };
+      onAddExpense(newExpense);
+    }
 
-    onAddExpense(newExpense);
     setShowModal(false);
     setDescription("");
     setAmount("");
     setStatus("paid");
-    setInstallments("1");
+    setIsInstallment(false);
+    setInstallments("2");
   };
 
   const defaultCategories = ["Moradia", "Alimentação", "Educação", "Saúde", "Transporte", "Lazer", "Outros"];
@@ -289,20 +321,63 @@ export default function ExpenseTable({
                 </div>
               )}
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">Parcelamento</label>
-                <select
-                  value={installments}
-                  onChange={(e) => setInstallments(e.target.value)}
-                  className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-rose-500"
-                >
-                  <option value="1">À vista (1x)</option>
-                  {[2, 3, 4, 5, 6, 8, 10, 12, 18, 24].map((n) => (
-                    <option key={n} value={n.toString()}>
-                      {n}x parcelado
-                    </option>
-                  ))}
-                </select>
+              <div className="space-y-2">
+                <label className="block text-xs font-semibold text-slate-600">Parcelamento</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsInstallment(false)}
+                    className={`px-3 py-2 rounded-xl text-xs font-semibold border transition-all ${
+                      !isInstallment
+                        ? "bg-slate-900 border-slate-900 text-white"
+                        : "border-slate-200 text-slate-600 hover:bg-slate-50"
+                    }`}
+                  >
+                    À vista (1x)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsInstallment(true)}
+                    className={`px-3 py-2 rounded-xl text-xs font-semibold border transition-all ${
+                      isInstallment
+                        ? "bg-indigo-50 border-indigo-500 text-indigo-700"
+                        : "border-slate-200 text-slate-600 hover:bg-slate-50"
+                    }`}
+                  >
+                    Parcelado (Escolher qtd.)
+                  </button>
+                </div>
+
+                {isInstallment && (
+                  <div className="bg-indigo-50/50 border border-indigo-200 rounded-xl p-3 space-y-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <label className="text-xs font-semibold text-indigo-900 shrink-0">
+                        Quantidade de Parcelas:
+                      </label>
+                      <input
+                        type="number"
+                        min="2"
+                        max="120"
+                        required
+                        placeholder="Ex: 10"
+                        value={installments}
+                        onChange={(e) => setInstallments(e.target.value)}
+                        className="w-28 px-3 py-1.5 border border-indigo-200 bg-white rounded-lg text-sm font-semibold text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500"
+                      />
+                    </div>
+                    {parsedTotalAmount > 0 && (
+                      <p className="text-[11px] text-indigo-700 leading-relaxed">
+                        Serão distribuídas <strong>{parsedInstallments} parcelas</strong> de{" "}
+                        <strong>{formatCurrency(installmentValue)}</strong> entre{" "}
+                        <strong>{formatMonthYearPt(date, true)}</strong> e{" "}
+                        <strong>
+                          {formatMonthYearPt(addMonthsIso(date, parsedInstallments - 1), true)}
+                        </strong>
+                        .
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div>
