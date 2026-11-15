@@ -83,26 +83,30 @@ export default function ChartsDashboard({
       <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
         <h4 className="text-sm font-semibold text-slate-800 mb-1">Distribuição por Categoria</h4>
         <p className="text-xs text-slate-500 mb-4">Onde a família mais gasta no mês</p>
-        <div className="h-64">
-          <ResponsiveContainer width="100%" height="100%">
-            <PieChart>
-              <Pie
-                data={categoryChartData}
-                cx="50%"
-                cy="50%"
-                innerRadius={50}
-                outerRadius={80}
-                paddingAngle={4}
-                dataKey="value"
-              >
-                {categoryChartData.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                ))}
-              </Pie>
-              <Tooltip formatter={(value: number) => formatCurrency(value)} />
-              <Legend wrapperStyle={{ fontSize: "11px" }} />
-            </PieChart>
-          </ResponsiveContainer>
+        <div className="h-64 flex items-center justify-center">
+          {categoryChartData.length === 0 ? (
+            <p className="text-xs text-slate-400">Sem saídas registradas neste mês.</p>
+          ) : (
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={categoryChartData}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={50}
+                  outerRadius={80}
+                  paddingAngle={4}
+                  dataKey="value"
+                >
+                  {categoryChartData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                  ))}
+                </Pie>
+                <Tooltip formatter={(value: number) => formatCurrency(value)} />
+                <Legend wrapperStyle={{ fontSize: "11px" }} />
+              </PieChart>
+            </ResponsiveContainer>
+          )}
         </div>
       </div>
 
@@ -110,26 +114,30 @@ export default function ChartsDashboard({
       <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
         <h4 className="text-sm font-semibold text-slate-800 mb-1">Gastos por Membro Familiar</h4>
         <p className="text-xs text-slate-500 mb-4">Participação no consumo mensal</p>
-        <div className="h-64">
-          <ResponsiveContainer width="100%" height="100%">
-            <PieChart>
-              <Pie
-                data={memberChartData}
-                cx="50%"
-                cy="50%"
-                innerRadius={50}
-                outerRadius={80}
-                paddingAngle={4}
-                dataKey="value"
-              >
-                {memberChartData.map((entry, index) => (
-                  <Cell key={`member-cell-${index}`} fill={COLORS[(index + 3) % COLORS.length]} />
-                ))}
-              </Pie>
-              <Tooltip formatter={(value: number) => formatCurrency(value)} />
-              <Legend wrapperStyle={{ fontSize: "11px" }} />
-            </PieChart>
-          </ResponsiveContainer>
+        <div className="h-64 flex items-center justify-center">
+          {memberChartData.length === 0 ? (
+            <p className="text-xs text-slate-400">Sem gastos por membro neste mês.</p>
+          ) : (
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={memberChartData}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={50}
+                  outerRadius={80}
+                  paddingAngle={4}
+                  dataKey="value"
+                >
+                  {memberChartData.map((entry, index) => (
+                    <Cell key={`member-cell-${index}`} fill={COLORS[(index + 3) % COLORS.length]} />
+                  ))}
+                </Pie>
+                <Tooltip formatter={(value: number) => formatCurrency(value)} />
+                <Legend wrapperStyle={{ fontSize: "11px" }} />
+              </PieChart>
+            </ResponsiveContainer>
+          )}
         </div>
       </div>
 

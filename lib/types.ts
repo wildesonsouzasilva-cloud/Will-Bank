@@ -30,6 +30,13 @@ export interface Expense {
   installments?: number;
   currentInstallment?: number;
   status: "paid" | "pending";
+  sourceIncomeId?: string;
+}
+
+export interface TitheConfig {
+  enabled: boolean;
+  percentage: number;
+  category: string;
 }
 
 export interface CreditCard {

@@ -26,6 +26,7 @@ import {
   BudgetCategory,
   FinancialGoal,
   DebtRecord,
+  TitheConfig,
 } from "@/lib/types";
 import {
   initialFamilyMembers,
@@ -154,6 +155,9 @@ function toExpenseDoc(e: Expense, uid: string) {
   }
   if (typeof e.currentInstallment === "number" && e.currentInstallment >= 1) {
     base.currentInstallment = clampNum(Math.round(e.currentInstallment), 1, 120);
+  }
+  if (e.sourceIncomeId && e.sourceIncomeId.trim() !== "") {
+    base.sourceIncomeId = e.sourceIncomeId.trim().slice(0, 128);
   }
   return { id, data: base };
 }
@@ -387,6 +391,7 @@ export async function ensureWorkspaceInitialized(uid: string): Promise<void> {
 
 export interface WorkspaceCallbacks {
   onMonth: (month: string) => void;
+  onTitheConfig?: (config: TitheConfig) => void;
   onFamilyMembers: (items: FamilyMember[]) => void;
   onCreditCards: (items: CreditCard[]) => void;
   onIncomes: (items: Income[]) => void;
@@ -410,6 +415,17 @@ export function subscribeToWorkspace(uid: string, callbacks: WorkspaceCallbacks)
           if (typeof data.referenceMonth === "string") {
             callbacks.onMonth(data.referenceMonth);
           }
+          callbacks.onTitheConfig?.({
+            enabled: typeof data.titheEnabled === "boolean" ? data.titheEnabled : true,
+            percentage:
+              typeof data.tithePercentage === "number" && Number.isFinite(data.tithePercentage)
+                ? clampNum(data.tithePercentage, 0, 100)
+                : 10,
+            category:
+              typeof data.titheCategory === "string" && data.titheCategory.trim()
+                ? clampStr(data.titheCategory, 60, "Dízimo")
+                : "Dízimo",
+          });
         }
         callbacks.onSyncReady?.();
       },
@@ -517,6 +533,7 @@ export function subscribeToWorkspace(uid: string, callbacks: WorkspaceCallbacks)
               ? { currentInstallment: data.currentInstallment }
               : {}),
             status: data.status as Expense["status"],
+            ...(data.sourceIncomeId ? { sourceIncomeId: String(data.sourceIncomeId) } : {}),
           }));
         callbacks.onExpenses(list);
       },
@@ -619,6 +636,23 @@ export async function updateReferenceMonth(uid: string, referenceMonth: string):
   try {
     await updateDoc(doc(db, "users", uid), {
       referenceMonth,
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
+export async function updateTitheConfigInCloud(
+  uid: string,
+  config: TitheConfig
+): Promise<void> {
+  const path = `users/${uid}`;
+  try {
+    await updateDoc(doc(db, "users", uid), {
+      titheEnabled: Boolean(config.enabled),
+      tithePercentage: clampNum(config.percentage, 0, 100),
+      titheCategory: clampStr(config.category, 60, "Dízimo"),
       updatedAt: serverTimestamp(),
     });
   } catch (error) {
@@ -757,6 +791,141 @@ export async function toggleExpenseStatusInCloud(uid: string, expense: Expense):
   }
 }
 
+export async function updateExpenseInCloud(
+  uid: string,
+  prevExpense: Expense,
+  nextExpense: Expense,
+  prevBudget?: BudgetCategory,
+  nextBudget?: BudgetCategory,
+  prevCard?: CreditCard,
+  nextCard?: CreditCard
+): Promise<void> {
+  const validMethods: Expense["paymentMethod"][] = ["credit_card", "debit", "pix", "cash"];
+  const paymentMethod = validMethods.includes(nextExpense.paymentMethod)
+    ? nextExpense.paymentMethod
+    : "pix";
+  const status: Expense["status"] = nextExpense.status === "pending" ? "pending" : "paid";
+
+  const payload: Record<string, unknown> = {
+    description: clampStr(nextExpense.description, 160, "Despesa"),
+    amount: clampNum(nextExpense.amount, 0),
+    date: clampStr(nextExpense.date, 20, "2026-11-01"),
+    category: clampStr(nextExpense.category, 60, "Outros"),
+    memberId: (nextExpense.memberId || "").slice(0, 128),
+    paymentMethod,
+    status,
+    updatedAt: serverTimestamp(),
+  };
+
+  if (paymentMethod === "credit_card" && nextExpense.cardId && nextExpense.cardId.trim() !== "") {
+    payload.cardId = nextExpense.cardId.trim().slice(0, 128);
+  } else if (prevExpense.cardId) {
+    payload.cardId = deleteField();
+  }
+
+  if (typeof nextExpense.installments === "number" && nextExpense.installments >= 1) {
+    payload.installments = clampNum(Math.round(nextExpense.installments), 1, 120);
+    payload.currentInstallment = clampNum(Math.round(nextExpense.currentInstallment || 1), 1, 120);
+  } else {
+    if (prevExpense.installments !== undefined) payload.installments = deleteField();
+    if (prevExpense.currentInstallment !== undefined) payload.currentInstallment = deleteField();
+  }
+
+  if (nextExpense.sourceIncomeId && nextExpense.sourceIncomeId.trim() !== "") {
+    payload.sourceIncomeId = nextExpense.sourceIncomeId.trim().slice(0, 128);
+  } else if (prevExpense.sourceIncomeId) {
+    payload.sourceIncomeId = deleteField();
+  }
+
+  const expPath = `users/${uid}/expenses/${nextExpense.id}`;
+  try {
+    await updateDoc(doc(db, "users", uid, "expenses", nextExpense.id), payload);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, expPath);
+  }
+
+  // Adjust budget spent deltas
+  if (prevBudget && nextBudget && prevBudget.id === nextBudget.id) {
+    const delta = nextExpense.amount - prevExpense.amount;
+    if (delta !== 0) {
+      const budgetPath = `users/${uid}/budgets/${nextBudget.id}`;
+      try {
+        await updateDoc(doc(db, "users", uid, "budgets", nextBudget.id), {
+          spent: clampNum(prevBudget.spent + delta, 0),
+          updatedAt: serverTimestamp(),
+        });
+      } catch (error) {
+        handleFirestoreError(error, OperationType.UPDATE, budgetPath);
+      }
+    }
+  } else {
+    if (prevBudget) {
+      const prevBudgetPath = `users/${uid}/budgets/${prevBudget.id}`;
+      try {
+        await updateDoc(doc(db, "users", uid, "budgets", prevBudget.id), {
+          spent: clampNum(prevBudget.spent - prevExpense.amount, 0),
+          updatedAt: serverTimestamp(),
+        });
+      } catch (error) {
+        handleFirestoreError(error, OperationType.UPDATE, prevBudgetPath);
+      }
+    }
+    if (nextBudget) {
+      const nextBudgetPath = `users/${uid}/budgets/${nextBudget.id}`;
+      try {
+        await updateDoc(doc(db, "users", uid, "budgets", nextBudget.id), {
+          spent: clampNum(nextBudget.spent + nextExpense.amount, 0),
+          updatedAt: serverTimestamp(),
+        });
+      } catch (error) {
+        handleFirestoreError(error, OperationType.UPDATE, nextBudgetPath);
+      }
+    }
+  }
+
+  // Adjust credit card used deltas
+  const oldCardContrib = prevExpense.paymentMethod === "credit_card" ? prevExpense.amount : 0;
+  const newCardContrib = paymentMethod === "credit_card" ? nextExpense.amount : 0;
+
+  if (prevCard && nextCard && prevCard.id === nextCard.id) {
+    const cardDelta = newCardContrib - oldCardContrib;
+    if (cardDelta !== 0) {
+      const cardPath = `users/${uid}/creditCards/${nextCard.id}`;
+      try {
+        await updateDoc(doc(db, "users", uid, "creditCards", nextCard.id), {
+          used: clampNum(prevCard.used + cardDelta, 0),
+          updatedAt: serverTimestamp(),
+        });
+      } catch (error) {
+        handleFirestoreError(error, OperationType.UPDATE, cardPath);
+      }
+    }
+  } else {
+    if (prevCard && oldCardContrib > 0) {
+      const prevCardPath = `users/${uid}/creditCards/${prevCard.id}`;
+      try {
+        await updateDoc(doc(db, "users", uid, "creditCards", prevCard.id), {
+          used: clampNum(prevCard.used - oldCardContrib, 0),
+          updatedAt: serverTimestamp(),
+        });
+      } catch (error) {
+        handleFirestoreError(error, OperationType.UPDATE, prevCardPath);
+      }
+    }
+    if (nextCard && newCardContrib > 0) {
+      const nextCardPath = `users/${uid}/creditCards/${nextCard.id}`;
+      try {
+        await updateDoc(doc(db, "users", uid, "creditCards", nextCard.id), {
+          used: clampNum(nextCard.used + newCardContrib, 0),
+          updatedAt: serverTimestamp(),
+        });
+      } catch (error) {
+        handleFirestoreError(error, OperationType.UPDATE, nextCardPath);
+      }
+    }
+  }
+}
+
 export async function payCreditCardInvoiceInCloud(
   uid: string,
   cardId: string,
@@ -810,6 +979,25 @@ export async function toggleIncomeStatusInCloud(uid: string, income: Income): Pr
   try {
     await updateDoc(doc(db, "users", uid, "incomes", income.id), {
       status: nextStatus,
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
+export async function updateIncomeInCloud(uid: string, income: Income): Promise<void> {
+  const status: Income["status"] = income.status === "pending" ? "pending" : "received";
+  const path = `users/${uid}/incomes/${income.id}`;
+  try {
+    await updateDoc(doc(db, "users", uid, "incomes", income.id), {
+      description: clampStr(income.description, 160, "Receita"),
+      amount: clampNum(income.amount, 0),
+      date: clampStr(income.date, 20, "2026-11-01"),
+      category: clampStr(income.category, 60, "Outros"),
+      memberId: (income.memberId || "").slice(0, 128),
+      isRecurring: Boolean(income.isRecurring),
+      status,
       updatedAt: serverTimestamp(),
     });
   } catch (error) {

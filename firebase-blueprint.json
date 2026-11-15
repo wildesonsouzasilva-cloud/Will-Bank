@@ -23,6 +23,20 @@
           "type": "boolean",
           "description": "Whether initial workspace collections have been seeded."
         },
+        "titheEnabled": {
+          "type": "boolean",
+          "description": "Whether automatic tithe expense generation is enabled when income is received."
+        },
+        "tithePercentage": {
+          "type": "number",
+          "description": "Tithe percentage applied to received incomes (0-100)."
+        },
+        "titheCategory": {
+          "type": "string",
+          "description": "Expense category where automatic tithe expenses are recorded.",
+          "minLength": 1,
+          "maxLength": 60
+        },
         "createdAt": {
           "type": "string",
           "format": "date-time",
@@ -109,6 +123,7 @@
         "installments": { "type": "number" },
         "currentInstallment": { "type": "number" },
         "status": { "type": "string", "enum": ["paid", "pending"] },
+        "sourceIncomeId": { "type": "string", "maxLength": 128 },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },

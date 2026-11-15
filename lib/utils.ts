@@ -126,3 +126,35 @@ export function buildDebtSchedule(debt: {
   }
   return items;
 }
+
+export function computeCreditCardInvoiceDueDate(
+  purchaseDateIso: string,
+  closingDay: number,
+  dueDay: number
+): { dueDate: string; shiftedAfterClosing: boolean; invoiceMonth: string } {
+  const parts = (purchaseDateIso || "").split("-");
+  if (parts.length !== 3) {
+    return {
+      dueDate: purchaseDateIso,
+      shiftedAfterClosing: false,
+      invoiceMonth: getYearMonthKey(purchaseDateIso),
+    };
+  }
+  const purchaseDay = parseInt(parts[2], 10);
+  const safeClosing = Math.min(31, Math.max(1, Math.round(closingDay || 1)));
+  const safeDue = Math.min(31, Math.max(1, Math.round(dueDay || 10)));
+
+  const shiftedAfterClosing = Number.isFinite(purchaseDay) && purchaseDay > safeClosing;
+  // Base invoice offset: if dueDay < closingDay, the cycle closing in month M is due in month M+1.
+  const baseMonthOffset = safeDue < safeClosing ? 1 : 0;
+  const totalOffset = baseMonthOffset + (shiftedAfterClosing ? 1 : 0);
+
+  const anchorDate = `${parts[0]}-${parts[1]}-${String(safeDue).padStart(2, "0")}`;
+  const dueDate = addMonthsIso(anchorDate, totalOffset);
+  return {
+    dueDate,
+    shiftedAfterClosing,
+    invoiceMonth: getYearMonthKey(dueDate),
+  };
+}
+

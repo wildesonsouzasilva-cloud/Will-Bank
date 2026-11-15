@@ -3,7 +3,7 @@
 import React, { useState } from "react";
 import { Income, FamilyMember } from "@/lib/types";
 import { formatCurrency, formatDate, formatMonthYearPt, getYearMonthKey } from "@/lib/utils";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, Trash2, Pencil } from "lucide-react";
 
 interface IncomeTableProps {
   incomes: Income[];
@@ -11,6 +11,7 @@ interface IncomeTableProps {
   referenceMonth?: string;
   limitRows?: number;
   onAddIncome: (income: Income) => void;
+  onEditIncome?: (income: Income) => void;
   onDeleteIncome: (id: string) => void;
   onToggleStatus?: (id: string) => void;
 }
@@ -21,10 +22,12 @@ export default function IncomeTable({
   referenceMonth,
   limitRows,
   onAddIncome,
+  onEditIncome,
   onDeleteIncome,
   onToggleStatus,
 }: IncomeTableProps) {
   const [showModal, setShowModal] = useState(false);
+  const [editingIncome, setEditingIncome] = useState<Income | null>(null);
   const [monthScope, setMonthScope] = useState<"selected" | "all">("selected");
   const [statusFilter, setStatusFilter] = useState<"all" | "received" | "pending">("all");
   const [description, setDescription] = useState("");
@@ -35,9 +38,27 @@ export default function IncomeTable({
   const [isRecurring, setIsRecurring] = useState(true);
   const [status, setStatus] = useState<"received" | "pending">("received");
 
-  const openModal = () => {
+  const openCreateModal = () => {
+    setEditingIncome(null);
+    setDescription("");
+    setAmount("");
+    setCategory("Salário");
+    setMemberId(familyMembers[0]?.id || "");
     setDate(`${referenceMonth || "2026-11"}-05`);
+    setIsRecurring(true);
     setStatus("received");
+    setShowModal(true);
+  };
+
+  const openEditModal = (income: Income) => {
+    setEditingIncome(income);
+    setDescription(income.description);
+    setAmount(String(income.amount));
+    setCategory(income.category || "Salário");
+    setMemberId(income.memberId || familyMembers[0]?.id || "");
+    setDate(income.date || `${referenceMonth || "2026-11"}-05`);
+    setIsRecurring(Boolean(income.isRecurring));
+    setStatus(income.status === "pending" ? "pending" : "received");
     setShowModal(true);
   };
 
@@ -47,27 +68,54 @@ export default function IncomeTable({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!description || !amount) return;
+    const parsedAmount = parseFloat(amount);
+    if (!description.trim() || !Number.isFinite(parsedAmount) || parsedAmount <= 0) return;
 
-    const newIncome: Income = {
-      id: `inc-${Date.now()}`,
-      description,
-      amount: parseFloat(amount),
-      date,
-      category,
-      memberId: validMemberId,
-      isRecurring,
-      status,
-    };
+    if (editingIncome && onEditIncome) {
+      const updatedIncome: Income = {
+        ...editingIncome,
+        description: description.trim(),
+        amount: parsedAmount,
+        date,
+        category,
+        memberId: validMemberId,
+        isRecurring,
+        status,
+      };
+      onEditIncome(updatedIncome);
+    } else {
+      const newIncome: Income = {
+        id: `inc-${Date.now()}`,
+        description: description.trim(),
+        amount: parsedAmount,
+        date,
+        category,
+        memberId: validMemberId,
+        isRecurring,
+        status,
+      };
+      onAddIncome(newIncome);
+    }
 
-    onAddIncome(newIncome);
     setShowModal(false);
+    setEditingIncome(null);
     setDescription("");
     setAmount("");
     setStatus("received");
   };
 
   const categories = ["Salário", "Investimentos", "Freelance", "Aluguel Recebido", "Bônus", "Outros"];
+
+  const getDisplayedDate = (income: Income) => {
+    const isProjectedRecurring =
+      referenceMonth &&
+      monthScope === "selected" &&
+      income.isRecurring &&
+      getYearMonthKey(income.date) < referenceMonth;
+    return isProjectedRecurring
+      ? `${referenceMonth}-${(income.date || "2026-11-05").slice(8, 10) || "05"}`
+      : income.date;
+  };
 
   const monthScopedIncomes =
     referenceMonth && monthScope === "selected"
@@ -86,12 +134,23 @@ export default function IncomeTable({
     .reduce((acc, inc) => acc + inc.amount, 0);
   const totalScopedIncome = receivedTotal + pendingTotal;
 
-  const filteredIncomes = monthScopedIncomes.filter((inc) => {
-    const normalizedStatus = inc.status === "pending" ? "pending" : "received";
-    if (statusFilter === "received") return normalizedStatus === "received";
-    if (statusFilter === "pending") return normalizedStatus === "pending";
-    return true;
-  });
+  // Organizar entradas de acordo com o recebimento:
+  // 1) Já recebidas primeiro, seguidas pelas A Receber
+  // 2) Dentro de cada grupo, em ordem cronológica da data de recebimento
+  const filteredIncomes = monthScopedIncomes
+    .filter((inc) => {
+      const normalizedStatus = inc.status === "pending" ? "pending" : "received";
+      if (statusFilter === "received") return normalizedStatus === "received";
+      if (statusFilter === "pending") return normalizedStatus === "pending";
+      return true;
+    })
+    .slice()
+    .sort((a, b) => {
+      const aPending = a.status === "pending" ? 1 : 0;
+      const bPending = b.status === "pending" ? 1 : 0;
+      if (aPending !== bPending) return aPending - bPending;
+      return (getDisplayedDate(a) || "").localeCompare(getDisplayedDate(b) || "");
+    });
 
   const visibleIncomes = limitRows ? filteredIncomes.slice(0, limitRows) : filteredIncomes;
 
@@ -103,8 +162,8 @@ export default function IncomeTable({
             <h3 className="font-bold text-slate-900 text-lg">Controle de Receitas</h3>
             <p className="text-xs text-slate-500">
               {referenceMonth && monthScope === "selected"
-                ? `Entradas e recorrentes em ${formatMonthYearPt(referenceMonth)}`
-                : "Fontes de renda e entradas da família"}
+                ? `Entradas ordenadas por recebimento em ${formatMonthYearPt(referenceMonth)}`
+                : "Fontes de renda ordenadas por recebimento"}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -135,7 +194,7 @@ export default function IncomeTable({
               </div>
             )}
             <button
-              onClick={openModal}
+              onClick={openCreateModal}
               className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-xl text-xs sm:text-sm font-semibold hover:bg-emerald-700 transition-colors shadow-xs"
             >
               <Plus className="w-4 h-4" />
@@ -190,7 +249,7 @@ export default function IncomeTable({
               <th className="px-6 py-3.5">Categoria</th>
               <th className="px-6 py-3.5">Membro</th>
               <th className="px-6 py-3.5">Recorrente</th>
-              <th className="px-6 py-3.5">Data</th>
+              <th className="px-6 py-3.5">Recebimento</th>
               <th className="px-6 py-3.5 text-right">Valor</th>
               <th className="px-6 py-3.5 text-center">Ações</th>
             </tr>
@@ -212,9 +271,7 @@ export default function IncomeTable({
                   monthScope === "selected" &&
                   income.isRecurring &&
                   getYearMonthKey(income.date) < referenceMonth;
-                const displayedDate = isProjectedRecurring
-                  ? `${referenceMonth}-${(income.date || "2026-11-05").slice(8, 10) || "05"}`
-                  : income.date;
+                const displayedDate = getDisplayedDate(income);
                 const isReceived = income.status !== "pending";
 
                 return (
@@ -285,22 +342,37 @@ export default function IncomeTable({
                         <span className="text-slate-400">Eventual</span>
                       )}
                     </td>
-                    <td className="px-6 py-4 text-xs text-slate-500">{formatDate(displayedDate)}</td>
+                    <td className="px-6 py-4 text-xs text-slate-500 whitespace-nowrap">
+                      {formatDate(displayedDate)}
+                    </td>
                     <td
-                      className={`px-6 py-4 text-right font-semibold ${
+                      className={`px-6 py-4 text-right font-semibold whitespace-nowrap ${
                         isReceived ? "text-emerald-600" : "text-amber-700"
                       }`}
                     >
                       +{formatCurrency(income.amount)}
                     </td>
                     <td className="px-6 py-4 text-center">
-                      <button
-                        onClick={() => onDeleteIncome(income.id)}
-                        className="text-slate-400 hover:text-rose-600 p-1 rounded-md transition-colors"
-                        title="Excluir"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      <div className="inline-flex items-center justify-center gap-1">
+                        {onEditIncome && (
+                          <button
+                            type="button"
+                            onClick={() => openEditModal(income)}
+                            className="text-slate-400 hover:text-blue-600 p-1 rounded-md transition-colors"
+                            title="Editar receita"
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => onDeleteIncome(income.id)}
+                          className="text-slate-400 hover:text-rose-600 p-1 rounded-md transition-colors"
+                          title="Excluir"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 );
@@ -310,11 +382,13 @@ export default function IncomeTable({
         </table>
       </div>
 
-      {/* Modal Nova Receita */}
+      {/* Modal Nova / Editar Receita */}
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-xs p-4">
           <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-xl border border-slate-200">
-            <h3 className="text-lg font-bold text-slate-900 mb-4">Adicionar Nova Receita</h3>
+            <h3 className="text-lg font-bold text-slate-900 mb-4">
+              {editingIncome ? "Editar Receita" : "Adicionar Nova Receita"}
+            </h3>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-600 mb-1">Descrição</label>
@@ -342,7 +416,7 @@ export default function IncomeTable({
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">Data</label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Data de Recebimento</label>
                   <input
                     type="date"
                     value={date}
@@ -429,7 +503,10 @@ export default function IncomeTable({
               <div className="flex justify-end gap-2 pt-3">
                 <button
                   type="button"
-                  onClick={() => setShowModal(false)}
+                  onClick={() => {
+                    setShowModal(false);
+                    setEditingIncome(null);
+                  }}
                   className="px-4 py-2 border border-slate-200 text-slate-600 text-xs sm:text-sm rounded-xl font-medium hover:bg-slate-50 transition-colors"
                 >
                   Cancelar
@@ -438,7 +515,7 @@ export default function IncomeTable({
                   type="submit"
                   className="px-4 py-2 bg-emerald-600 text-white text-xs sm:text-sm rounded-xl font-semibold hover:bg-emerald-700 transition-colors shadow-xs"
                 >
-                  Salvar Receita
+                  {editingIncome ? "Salvar Alterações" : "Salvar Receita"}
                 </button>
               </div>
             </form>

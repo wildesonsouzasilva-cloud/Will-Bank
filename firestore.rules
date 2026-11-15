@@ -48,13 +48,16 @@ service cloud.firestore {
     // Entity Validation Blueprints
     function isValidUserWorkspace(data, userId) {
       return data.keys().hasAll(['ownerId', 'referenceMonth', 'initialized', 'createdAt', 'updatedAt']) &&
-        data.keys().hasOnly(['ownerId', 'referenceMonth', 'initialized', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['ownerId', 'referenceMonth', 'initialized', 'titheEnabled', 'tithePercentage', 'titheCategory', 'createdAt', 'updatedAt']) &&
         data.ownerId == request.auth.uid &&
         data.ownerId == userId &&
         data.referenceMonth is string &&
         data.referenceMonth.size() == 7 &&
         data.referenceMonth.matches('^\\d{4}-\\d{2}$') &&
         data.initialized is bool &&
+        (!('titheEnabled' in data) || data.titheEnabled is bool) &&
+        (!('tithePercentage' in data) || (data.tithePercentage is number && data.tithePercentage >= 0 && data.tithePercentage <= 100)) &&
+        (!('titheCategory' in data) || isValidNonEmptyStr(data.titheCategory, 60)) &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp;
     }
@@ -108,7 +111,7 @@ service cloud.firestore {
 
     function isValidExpense(data, expenseId) {
       return data.keys().hasAll(['id', 'ownerId', 'description', 'amount', 'date', 'category', 'memberId', 'paymentMethod', 'status', 'createdAt', 'updatedAt']) &&
-        data.keys().hasOnly(['id', 'ownerId', 'description', 'amount', 'date', 'category', 'memberId', 'paymentMethod', 'cardId', 'installments', 'currentInstallment', 'status', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'ownerId', 'description', 'amount', 'date', 'category', 'memberId', 'paymentMethod', 'cardId', 'installments', 'currentInstallment', 'status', 'sourceIncomeId', 'createdAt', 'updatedAt']) &&
         data.id == expenseId &&
         data.ownerId == request.auth.uid &&
         isValidNonEmptyStr(data.description, 160) &&
@@ -120,6 +123,7 @@ service cloud.firestore {
         (!('cardId' in data) || (data.cardId is string && data.cardId.size() <= 128)) &&
         (!('installments' in data) || (data.installments is number && data.installments >= 1 && data.installments <= 120)) &&
         (!('currentInstallment' in data) || (data.currentInstallment is number && data.currentInstallment >= 1 && data.currentInstallment <= 120)) &&
+        (!('sourceIncomeId' in data) || (data.sourceIncomeId is string && data.sourceIncomeId.size() <= 128)) &&
         data.status in ['paid', 'pending'] &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp;
@@ -203,7 +207,8 @@ service cloud.firestore {
         (
           incoming().diff(existing()).affectedKeys().hasOnly(['referenceMonth', 'updatedAt']) ||
           incoming().diff(existing()).affectedKeys().hasOnly(['initialized', 'updatedAt']) ||
-          incoming().diff(existing()).affectedKeys().hasOnly(['referenceMonth', 'initialized', 'updatedAt'])
+          incoming().diff(existing()).affectedKeys().hasOnly(['referenceMonth', 'initialized', 'updatedAt']) ||
+          incoming().diff(existing()).affectedKeys().hasOnly(['titheEnabled', 'tithePercentage', 'titheCategory', 'updatedAt'])
         );
       allow delete: if false;
 
@@ -310,7 +315,7 @@ service cloud.firestore {
             incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']) ||
             incoming().diff(existing()).affectedKeys().hasOnly(['memberId', 'updatedAt']) ||
             incoming().diff(existing()).affectedKeys().hasOnly(['cardId', 'updatedAt']) ||
-            incoming().diff(existing()).affectedKeys().hasOnly(['description', 'amount', 'date', 'category', 'memberId', 'paymentMethod', 'cardId', 'installments', 'currentInstallment', 'status', 'updatedAt'])
+            incoming().diff(existing()).affectedKeys().hasOnly(['description', 'amount', 'date', 'category', 'memberId', 'paymentMethod', 'cardId', 'installments', 'currentInstallment', 'status', 'sourceIncomeId', 'updatedAt'])
           );
         allow delete: if isVerifiedOwner(userId) && isValidId(userId) && isValidId(expenseId) && parentOwnedByUser(userId);
       }
