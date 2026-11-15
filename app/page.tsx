@@ -19,7 +19,7 @@ import FinFamAiAssistant from "@/components/FinFamAiAssistant";
 import PendingDebtsManager from "@/components/PendingDebtsManager";
 
 import { auth, googleProvider, testFirestoreConnection } from "@/lib/firebase";
-import { addMonthsIso, getYearMonthKey } from "@/lib/utils";
+import { addMonthsIso, buildDebtSchedule, getYearMonthKey } from "@/lib/utils";
 import {
   ensureWorkspaceInitialized,
   subscribeToWorkspace,
@@ -31,6 +31,7 @@ import {
   payCreditCardInvoiceInCloud,
   addIncomeInCloud,
   deleteIncomeInCloud,
+  toggleIncomeStatusInCloud,
   addCardInCloud,
   deleteCardInCloud,
   syncBudgetsDiffInCloud,
@@ -219,6 +220,47 @@ export default function Home() {
 
   // Month-aware calculations (filters dynamically when user switches reference month/year)
   const monthExpenses = expenses.filter((e) => getYearMonthKey(e.date) === month);
+
+  const monthDebtOutflows: Expense[] = [];
+  for (const d of debts) {
+    if (d.debtMode === "installment") {
+      const schedule = buildDebtSchedule(d);
+      for (const item of schedule) {
+        if (item.yearMonth === month) {
+          monthDebtOutflows.push({
+            id: `debt-outflow-${d.id}-${item.installmentNumber}`,
+            description: `${d.title} (Parcela ${item.installmentNumber}/${d.totalInstallments})`,
+            amount: item.amount,
+            date: item.dueDate,
+            category: d.category,
+            memberId: d.memberId,
+            paymentMethod: "debit",
+            installments: d.totalInstallments,
+            currentInstallment: item.installmentNumber,
+            status: item.isPaid ? "paid" : "pending",
+          });
+        }
+      }
+    } else if (d.debtMode === "overdue") {
+      const ym = getYearMonthKey(d.dueDate);
+      const matchesMonth = d.status !== "paid" ? !ym || ym <= month : ym === month;
+      if (matchesMonth) {
+        monthDebtOutflows.push({
+          id: `debt-overdue-${d.id}`,
+          description: `${d.title} (Em atraso)`,
+          amount: d.totalAmount,
+          date: d.dueDate,
+          category: d.category,
+          memberId: d.memberId,
+          paymentMethod: "debit",
+          status: d.status === "paid" ? "paid" : "pending",
+        });
+      }
+    }
+  }
+
+  const monthAllOutflows = [...monthExpenses, ...monthDebtOutflows];
+
   const monthIncomes = incomes.filter((i) => {
     const incMonth = getYearMonthKey(i.date);
     if (incMonth === month) return true;
@@ -226,13 +268,22 @@ export default function Home() {
   });
   const monthBudgets = budgets.map((b) => ({
     ...b,
-    spent: monthExpenses
+    spent: monthAllOutflows
       .filter((e) => e.category.toLowerCase() === b.category.toLowerCase())
       .reduce((acc, e) => acc + e.amount, 0),
   }));
 
-  const totalIncome = monthIncomes.reduce((acc, curr) => acc + curr.amount, 0);
-  const totalExpense = monthExpenses.reduce((acc, curr) => acc + curr.amount, 0);
+  const receivedIncome = monthIncomes
+    .filter((i) => i.status !== "pending")
+    .reduce((acc, curr) => acc + curr.amount, 0);
+  const pendingIncome = monthIncomes
+    .filter((i) => i.status === "pending")
+    .reduce((acc, curr) => acc + curr.amount, 0);
+  const totalIncome = receivedIncome + pendingIncome;
+  const totalExpense = monthAllOutflows.reduce((acc, curr) => acc + curr.amount, 0);
+  const monthPendingOutflowsAmount = monthAllOutflows
+    .filter((e) => e.status === "pending")
+    .reduce((acc, curr) => acc + curr.amount, 0);
   const balance = totalIncome - totalExpense;
   const savingsRate = totalIncome > 0 ? ((totalIncome - totalExpense) / totalIncome) * 100 : 0;
 
@@ -414,6 +465,18 @@ export default function Home() {
     void runCloudAction(() => deleteIncomeInCloud(user.uid, id));
   };
 
+  const handleToggleIncomeStatus = (id: string) => {
+    const target = incomes.find((i) => i.id === id);
+    if (!target) return;
+
+    setIncomes((prev) =>
+      prev.map((i) =>
+        i.id === id ? { ...i, status: i.status === "pending" ? "received" : "pending" } : i
+      )
+    );
+    void runCloudAction(() => toggleIncomeStatusInCloud(user.uid, target));
+  };
+
   const handleAddCard = (newCard: CreditCard) => {
     setCreditCards((prev) => [...prev, newCard]);
     void runCloudAction(() => addCardInCloud(user.uid, newCard));
@@ -570,14 +633,16 @@ export default function Home() {
           <>
             <SummaryCards
               totalIncome={totalIncome}
+              receivedIncome={receivedIncome}
+              pendingIncome={pendingIncome}
               totalExpense={totalExpense}
               balance={balance}
               savingsRate={savingsRate}
-              pendingAmount={totalPendingDebts}
+              pendingAmount={monthPendingOutflowsAmount}
             />
 
             <ChartsDashboard
-              expenses={monthExpenses}
+              expenses={monthAllOutflows}
               incomes={monthIncomes}
               budgets={monthBudgets}
               familyMembers={familyMembers}
@@ -586,6 +651,7 @@ export default function Home() {
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <ExpenseTable
                 expenses={expenses}
+                debts={debts}
                 familyMembers={familyMembers}
                 creditCards={creditCards}
                 budgetCategories={budgets.map((b) => b.category)}
@@ -595,6 +661,9 @@ export default function Home() {
                 onAddExpenses={handleAddExpensesBatch}
                 onDeleteExpense={handleDeleteExpense}
                 onToggleStatus={handleToggleExpenseStatus}
+                onPayDebtInstallment={handlePayDebtInstallment}
+                onSettleDebt={handleSettleDebt}
+                onDeleteDebt={handleDeleteDebt}
               />
               <IncomeTable
                 incomes={incomes}
@@ -603,6 +672,7 @@ export default function Home() {
                 limitRows={5}
                 onAddIncome={handleAddIncome}
                 onDeleteIncome={handleDeleteIncome}
+                onToggleStatus={handleToggleIncomeStatus}
               />
             </div>
           </>
@@ -627,6 +697,7 @@ export default function Home() {
         {activeTab === "expenses" && (
           <ExpenseTable
             expenses={expenses}
+            debts={debts}
             familyMembers={familyMembers}
             creditCards={creditCards}
             budgetCategories={budgets.map((b) => b.category)}
@@ -635,6 +706,9 @@ export default function Home() {
             onAddExpenses={handleAddExpensesBatch}
             onDeleteExpense={handleDeleteExpense}
             onToggleStatus={handleToggleExpenseStatus}
+            onPayDebtInstallment={handlePayDebtInstallment}
+            onSettleDebt={handleSettleDebt}
+            onDeleteDebt={handleDeleteDebt}
           />
         )}
 
@@ -645,6 +719,7 @@ export default function Home() {
             referenceMonth={month}
             onAddIncome={handleAddIncome}
             onDeleteIncome={handleDeleteIncome}
+            onToggleStatus={handleToggleIncomeStatus}
           />
         )}
 
@@ -671,7 +746,7 @@ export default function Home() {
         {activeTab === "family" && (
           <FamilyMembersManager
             members={familyMembers}
-            expenses={monthExpenses}
+            expenses={monthAllOutflows}
             incomes={monthIncomes}
             onAddMember={handleAddMember}
             onDeleteMember={handleDeleteMember}
@@ -682,7 +757,7 @@ export default function Home() {
 
         {activeTab === "ai" && (
           <FinFamAiAssistant
-            expenses={monthExpenses}
+            expenses={monthAllOutflows}
             incomes={monthIncomes}
             budgets={monthBudgets}
             goals={goals}

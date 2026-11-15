@@ -12,6 +12,7 @@ interface IncomeTableProps {
   limitRows?: number;
   onAddIncome: (income: Income) => void;
   onDeleteIncome: (id: string) => void;
+  onToggleStatus?: (id: string) => void;
 }
 
 export default function IncomeTable({
@@ -21,18 +22,22 @@ export default function IncomeTable({
   limitRows,
   onAddIncome,
   onDeleteIncome,
+  onToggleStatus,
 }: IncomeTableProps) {
   const [showModal, setShowModal] = useState(false);
   const [monthScope, setMonthScope] = useState<"selected" | "all">("selected");
+  const [statusFilter, setStatusFilter] = useState<"all" | "received" | "pending">("all");
   const [description, setDescription] = useState("");
   const [amount, setAmount] = useState("");
   const [category, setCategory] = useState("Salário");
   const [memberId, setMemberId] = useState(familyMembers[0]?.id || "");
   const [date, setDate] = useState(`${referenceMonth || "2026-11"}-05`);
   const [isRecurring, setIsRecurring] = useState(true);
+  const [status, setStatus] = useState<"received" | "pending">("received");
 
   const openModal = () => {
     setDate(`${referenceMonth || "2026-11"}-05`);
+    setStatus("received");
     setShowModal(true);
   };
 
@@ -52,17 +57,19 @@ export default function IncomeTable({
       category,
       memberId: validMemberId,
       isRecurring,
+      status,
     };
 
     onAddIncome(newIncome);
     setShowModal(false);
     setDescription("");
     setAmount("");
+    setStatus("received");
   };
 
   const categories = ["Salário", "Investimentos", "Freelance", "Aluguel Recebido", "Bônus", "Outros"];
 
-  const filteredIncomes =
+  const monthScopedIncomes =
     referenceMonth && monthScope === "selected"
       ? incomes.filter((inc) => {
           const incMonth = getYearMonthKey(inc.date);
@@ -71,53 +78,106 @@ export default function IncomeTable({
         })
       : incomes;
 
+  const receivedTotal = monthScopedIncomes
+    .filter((inc) => inc.status !== "pending")
+    .reduce((acc, inc) => acc + inc.amount, 0);
+  const pendingTotal = monthScopedIncomes
+    .filter((inc) => inc.status === "pending")
+    .reduce((acc, inc) => acc + inc.amount, 0);
+  const totalScopedIncome = receivedTotal + pendingTotal;
+
+  const filteredIncomes = monthScopedIncomes.filter((inc) => {
+    const normalizedStatus = inc.status === "pending" ? "pending" : "received";
+    if (statusFilter === "received") return normalizedStatus === "received";
+    if (statusFilter === "pending") return normalizedStatus === "pending";
+    return true;
+  });
+
   const visibleIncomes = limitRows ? filteredIncomes.slice(0, limitRows) : filteredIncomes;
 
   return (
     <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
-      <div className="p-5 border-b border-slate-100 flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h3 className="font-bold text-slate-900 text-lg">Controle de Receitas</h3>
-          <p className="text-xs text-slate-500">
-            {referenceMonth && monthScope === "selected"
-              ? `Entradas e recorrentes em ${formatMonthYearPt(referenceMonth)}`
-              : "Fontes de renda e entradas da família"}
-          </p>
+      <div className="p-5 border-b border-slate-100 space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <h3 className="font-bold text-slate-900 text-lg">Controle de Receitas</h3>
+            <p className="text-xs text-slate-500">
+              {referenceMonth && monthScope === "selected"
+                ? `Entradas e recorrentes em ${formatMonthYearPt(referenceMonth)}`
+                : "Fontes de renda e entradas da família"}
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {referenceMonth && (
+              <div className="flex items-center bg-slate-100 p-0.5 rounded-xl border border-slate-200 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setMonthScope("selected")}
+                  className={`px-2.5 py-1 rounded-lg font-medium transition-colors ${
+                    monthScope === "selected"
+                      ? "bg-white text-slate-900 shadow-xs font-semibold"
+                      : "text-slate-600 hover:text-slate-900"
+                  }`}
+                >
+                  {formatMonthYearPt(referenceMonth, true)}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMonthScope("all")}
+                  className={`px-2.5 py-1 rounded-lg font-medium transition-colors ${
+                    monthScope === "all"
+                      ? "bg-white text-slate-900 shadow-xs font-semibold"
+                      : "text-slate-600 hover:text-slate-900"
+                  }`}
+                >
+                  Todos
+                </button>
+              </div>
+            )}
+            <button
+              onClick={openModal}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-xl text-xs sm:text-sm font-semibold hover:bg-emerald-700 transition-colors shadow-xs"
+            >
+              <Plus className="w-4 h-4" />
+              Nova Receita
+            </button>
+          </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {referenceMonth && (
-            <div className="flex items-center bg-slate-100 p-0.5 rounded-xl border border-slate-200 text-xs">
+
+        {/* Barra de Filtro e Totais Recebido / A Receber */}
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-100">
+          <div className="flex items-center bg-slate-100 p-0.5 rounded-xl border border-slate-200 text-xs">
+            {[
+              { id: "all", label: "Todas" },
+              { id: "received", label: "Recebido" },
+              { id: "pending", label: "A Receber" },
+            ].map((item) => (
               <button
+                key={item.id}
                 type="button"
-                onClick={() => setMonthScope("selected")}
+                onClick={() => setStatusFilter(item.id as typeof statusFilter)}
                 className={`px-2.5 py-1 rounded-lg font-medium transition-colors ${
-                  monthScope === "selected"
+                  statusFilter === item.id
                     ? "bg-white text-slate-900 shadow-xs font-semibold"
                     : "text-slate-600 hover:text-slate-900"
                 }`}
               >
-                {formatMonthYearPt(referenceMonth, true)}
+                {item.label}
               </button>
-              <button
-                type="button"
-                onClick={() => setMonthScope("all")}
-                className={`px-2.5 py-1 rounded-lg font-medium transition-colors ${
-                  monthScope === "all"
-                    ? "bg-white text-slate-900 shadow-xs font-semibold"
-                    : "text-slate-600 hover:text-slate-900"
-                }`}
-              >
-                Todos
-              </button>
-            </div>
-          )}
-          <button
-            onClick={openModal}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-xl text-xs sm:text-sm font-semibold hover:bg-emerald-700 transition-colors shadow-xs"
-          >
-            <Plus className="w-4 h-4" />
-            Nova Receita
-          </button>
+            ))}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <span className="px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 font-semibold">
+              Recebido: {formatCurrency(receivedTotal)}
+            </span>
+            <span className="px-2.5 py-1 rounded-lg bg-amber-50 text-amber-800 font-semibold">
+              A Receber: {formatCurrency(pendingTotal)}
+            </span>
+            <span className="px-2.5 py-1 rounded-lg bg-slate-100 text-slate-700 font-bold">
+              Total: {formatCurrency(totalScopedIncome)}
+            </span>
+          </div>
         </div>
       </div>
 
@@ -125,6 +185,7 @@ export default function IncomeTable({
         <table className="w-full text-left text-sm text-slate-600">
           <thead className="bg-slate-50 text-xs font-semibold text-slate-500 uppercase border-b border-slate-100">
             <tr>
+              <th className="px-6 py-3.5">Status</th>
               <th className="px-6 py-3.5">Descrição</th>
               <th className="px-6 py-3.5">Categoria</th>
               <th className="px-6 py-3.5">Membro</th>
@@ -137,68 +198,113 @@ export default function IncomeTable({
           <tbody className="divide-y divide-slate-100">
             {visibleIncomes.length === 0 ? (
               <tr>
-                <td colSpan={7} className="px-6 py-10 text-center text-xs sm:text-sm text-slate-400">
+                <td colSpan={8} className="px-6 py-10 text-center text-xs sm:text-sm text-slate-400">
                   {referenceMonth && monthScope === "selected"
-                    ? `Nenhuma receita registrada em ${formatMonthYearPt(referenceMonth)}.`
+                    ? `Nenhuma receita encontrada em ${formatMonthYearPt(referenceMonth)}.`
                     : "Nenhuma receita cadastrada."}
                 </td>
               </tr>
             ) : (
-            visibleIncomes.map((income) => {
-              const member = familyMembers.find((m) => m.id === income.memberId);
-              const isProjectedRecurring =
-                referenceMonth &&
-                monthScope === "selected" &&
-                income.isRecurring &&
-                getYearMonthKey(income.date) < referenceMonth;
-              const displayedDate = isProjectedRecurring
-                ? `${referenceMonth}-${(income.date || "2026-11-05").slice(8, 10) || "05"}`
-                : income.date;
+              visibleIncomes.map((income) => {
+                const member = familyMembers.find((m) => m.id === income.memberId);
+                const isProjectedRecurring =
+                  referenceMonth &&
+                  monthScope === "selected" &&
+                  income.isRecurring &&
+                  getYearMonthKey(income.date) < referenceMonth;
+                const displayedDate = isProjectedRecurring
+                  ? `${referenceMonth}-${(income.date || "2026-11-05").slice(8, 10) || "05"}`
+                  : income.date;
+                const isReceived = income.status !== "pending";
 
-              return (
-                <tr key={income.id} className="hover:bg-slate-50/70 transition-colors">
-                  <td className="px-6 py-4 font-medium text-slate-900 flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
-                    {income.description}
-                  </td>
-                  <td className="px-6 py-4">
-                    <span className="px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700">
-                      {income.category}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4">
-                    <span className="flex items-center gap-1.5 text-xs text-slate-700 font-medium">
-                      <span>{member?.avatar || "👤"}</span>
-                      {member?.name || "Geral"}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 text-xs">
-                    {income.isRecurring ? (
-                      <span className="text-blue-600 font-medium bg-blue-50 px-2 py-0.5 rounded-md">
-                        {isProjectedRecurring
-                          ? `Recorrente (desde ${formatMonthYearPt(income.date, true)})`
-                          : "Sim (Mensal)"}
+                return (
+                  <tr key={income.id} className="hover:bg-slate-50/70 transition-colors">
+                    <td className="px-6 py-4">
+                      {onToggleStatus ? (
+                        <button
+                          type="button"
+                          onClick={() => onToggleStatus(income.id)}
+                          className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold transition-colors whitespace-nowrap ${
+                            isReceived
+                              ? "bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                              : "bg-amber-100 text-amber-800 hover:bg-amber-200"
+                          }`}
+                          title="Clique para alternar entre Recebido e A Receber"
+                        >
+                          <span
+                            className={`w-1.5 h-1.5 rounded-full ${
+                              isReceived ? "bg-emerald-600" : "bg-amber-600"
+                            }`}
+                          />
+                          {isReceived ? "Recebido" : "A Receber"}
+                        </button>
+                      ) : (
+                        <span
+                          className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold whitespace-nowrap ${
+                            isReceived
+                              ? "bg-emerald-50 text-emerald-700"
+                              : "bg-amber-100 text-amber-800"
+                          }`}
+                        >
+                          <span
+                            className={`w-1.5 h-1.5 rounded-full ${
+                              isReceived ? "bg-emerald-600" : "bg-amber-600"
+                            }`}
+                          />
+                          {isReceived ? "Recebido" : "A Receber"}
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-6 py-4 font-medium text-slate-900 flex items-center gap-2">
+                      <span
+                        className={`w-2 h-2 rounded-full shrink-0 ${
+                          isReceived ? "bg-emerald-500" : "bg-amber-500"
+                        }`}
+                      />
+                      {income.description}
+                    </td>
+                    <td className="px-6 py-4">
+                      <span className="px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700">
+                        {income.category}
                       </span>
-                    ) : (
-                      <span className="text-slate-400">Eventual</span>
-                    )}
-                  </td>
-                  <td className="px-6 py-4 text-xs text-slate-500">{formatDate(displayedDate)}</td>
-                  <td className="px-6 py-4 text-right font-semibold text-emerald-600">
-                    +{formatCurrency(income.amount)}
-                  </td>
-                  <td className="px-6 py-4 text-center">
-                    <button
-                      onClick={() => onDeleteIncome(income.id)}
-                      className="text-slate-400 hover:text-rose-600 p-1 rounded-md transition-colors"
-                      title="Excluir"
+                    </td>
+                    <td className="px-6 py-4">
+                      <span className="flex items-center gap-1.5 text-xs text-slate-700 font-medium">
+                        <span>{member?.avatar || "👤"}</span>
+                        {member?.name || "Geral"}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 text-xs">
+                      {income.isRecurring ? (
+                        <span className="text-blue-600 font-medium bg-blue-50 px-2 py-0.5 rounded-md">
+                          {isProjectedRecurring
+                            ? `Recorrente (desde ${formatMonthYearPt(income.date, true)})`
+                            : "Sim (Mensal)"}
+                        </span>
+                      ) : (
+                        <span className="text-slate-400">Eventual</span>
+                      )}
+                    </td>
+                    <td className="px-6 py-4 text-xs text-slate-500">{formatDate(displayedDate)}</td>
+                    <td
+                      className={`px-6 py-4 text-right font-semibold ${
+                        isReceived ? "text-emerald-600" : "text-amber-700"
+                      }`}
                     >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </td>
-                </tr>
-              );
-            })
+                      +{formatCurrency(income.amount)}
+                    </td>
+                    <td className="px-6 py-4 text-center">
+                      <button
+                        onClick={() => onDeleteIncome(income.id)}
+                        className="text-slate-400 hover:text-rose-600 p-1 rounded-md transition-colors"
+                        title="Excluir"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>
@@ -277,7 +383,37 @@ export default function IncomeTable({
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 pt-2">
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">
+                  Situação da Entrada
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setStatus("received")}
+                    className={`px-3 py-2 rounded-xl text-xs font-semibold border transition-all ${
+                      status === "received"
+                        ? "bg-emerald-50 border-emerald-500 text-emerald-700"
+                        : "border-slate-200 text-slate-600 hover:bg-slate-50"
+                    }`}
+                  >
+                    ✓ Recebido
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setStatus("pending")}
+                    className={`px-3 py-2 rounded-xl text-xs font-semibold border transition-all ${
+                      status === "pending"
+                        ? "bg-amber-50 border-amber-500 text-amber-800"
+                        : "border-slate-200 text-slate-600 hover:bg-slate-50"
+                    }`}
+                  >
+                    ⏳ A Receber
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 pt-1">
                 <input
                   type="checkbox"
                   id="recurring"
@@ -290,7 +426,7 @@ export default function IncomeTable({
                 </label>
               </div>
 
-              <div className="flex justify-end gap-2 pt-4">
+              <div className="flex justify-end gap-2 pt-3">
                 <button
                   type="button"
                   onClick={() => setShowModal(false)}

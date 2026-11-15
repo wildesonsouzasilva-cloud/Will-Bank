@@ -92,7 +92,7 @@ service cloud.firestore {
 
     function isValidIncome(data, incomeId) {
       return data.keys().hasAll(['id', 'ownerId', 'description', 'amount', 'date', 'category', 'memberId', 'createdAt', 'updatedAt']) &&
-        data.keys().hasOnly(['id', 'ownerId', 'description', 'amount', 'date', 'category', 'memberId', 'isRecurring', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'ownerId', 'description', 'amount', 'date', 'category', 'memberId', 'isRecurring', 'status', 'createdAt', 'updatedAt']) &&
         data.id == incomeId &&
         data.ownerId == request.auth.uid &&
         isValidNonEmptyStr(data.description, 160) &&
@@ -101,6 +101,7 @@ service cloud.firestore {
         isValidNonEmptyStr(data.category, 60) &&
         data.memberId is string && data.memberId.size() <= 128 &&
         (!('isRecurring' in data) || data.isRecurring is bool) &&
+        (!('status' in data) || data.status in ['received', 'pending']) &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp;
     }
@@ -278,8 +279,9 @@ service cloud.firestore {
           incoming().updatedAt == request.time &&
           parentOwnedByUser(userId) &&
           (
+            incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']) ||
             incoming().diff(existing()).affectedKeys().hasOnly(['memberId', 'updatedAt']) ||
-            incoming().diff(existing()).affectedKeys().hasOnly(['description', 'amount', 'date', 'category', 'memberId', 'isRecurring', 'updatedAt'])
+            incoming().diff(existing()).affectedKeys().hasOnly(['description', 'amount', 'date', 'category', 'memberId', 'isRecurring', 'status', 'updatedAt'])
           );
         allow delete: if isVerifiedOwner(userId) && isValidId(userId) && isValidId(incomeId) && parentOwnedByUser(userId);
       }

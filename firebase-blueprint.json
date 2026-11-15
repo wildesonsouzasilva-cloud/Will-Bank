@@ -86,6 +86,7 @@
         "category": { "type": "string", "minLength": 1, "maxLength": 60 },
         "memberId": { "type": "string", "maxLength": 128 },
         "isRecurring": { "type": "boolean" },
+        "status": { "type": "string", "enum": ["received", "pending"] },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },

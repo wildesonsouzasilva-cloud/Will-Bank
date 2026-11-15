@@ -107,6 +107,7 @@ function toCardDoc(c: CreditCard, uid: string) {
 
 function toIncomeDoc(i: Income, uid: string) {
   const id = safeId(i.id, "inc");
+  const status: Income["status"] = i.status === "pending" ? "pending" : "received";
   const base: Record<string, unknown> = {
     id,
     ownerId: uid,
@@ -115,6 +116,7 @@ function toIncomeDoc(i: Income, uid: string) {
     date: clampStr(i.date, 20, "2026-11-01"),
     category: clampStr(i.category, 60, "Outros"),
     memberId: (i.memberId || "").slice(0, 128),
+    status,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   };
@@ -483,6 +485,7 @@ export function subscribeToWorkspace(uid: string, callbacks: WorkspaceCallbacks)
             date: String(data.date),
             category: String(data.category),
             memberId: String(data.memberId ?? ""),
+            status: (data.status === "pending" ? "pending" : "received") as Income["status"],
             ...(typeof data.isRecurring === "boolean" ? { isRecurring: data.isRecurring } : {}),
           }));
         callbacks.onIncomes(list);
@@ -798,6 +801,19 @@ export async function deleteIncomeInCloud(uid: string, incomeId: string): Promis
     await deleteDoc(doc(db, "users", uid, "incomes", incomeId));
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+export async function toggleIncomeStatusInCloud(uid: string, income: Income): Promise<void> {
+  const nextStatus: Income["status"] = income.status === "pending" ? "received" : "pending";
+  const path = `users/${uid}/incomes/${income.id}`;
+  try {
+    await updateDoc(doc(db, "users", uid, "incomes", income.id), {
+      status: nextStatus,
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
   }
 }
 

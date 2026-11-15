@@ -94,3 +94,35 @@ export function formatMonthYearPt(yearMonthOrDate: string, short = false): strin
   return `${label}/${year}`;
 }
 
+export interface DebtScheduleItem {
+  installmentNumber: number;
+  dueDate: string;
+  yearMonth: string;
+  amount: number;
+  isPaid: boolean;
+  isNext: boolean;
+}
+
+export function buildDebtSchedule(debt: {
+  totalInstallments: number;
+  paidInstallments: number;
+  dueDate: string;
+  installmentAmount: number;
+}): DebtScheduleItem[] {
+  const total = Math.max(1, debt.totalInstallments || 1);
+  const paid = Math.min(total, Math.max(0, debt.paidInstallments || 0));
+  const items: DebtScheduleItem[] = [];
+  for (let k = 1; k <= total; k++) {
+    const offsetFromNext = k - (paid + 1);
+    const itemDueDate = addMonthsIso(debt.dueDate, offsetFromNext);
+    items.push({
+      installmentNumber: k,
+      dueDate: itemDueDate,
+      yearMonth: getYearMonthKey(itemDueDate),
+      amount: debt.installmentAmount,
+      isPaid: k <= paid,
+      isNext: k === paid + 1,
+    });
+  }
+  return items;
+}

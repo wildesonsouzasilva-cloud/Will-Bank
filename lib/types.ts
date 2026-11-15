@@ -15,6 +15,7 @@ export interface Income {
   category: string;
   memberId: string;
   isRecurring?: boolean;
+  status?: "received" | "pending";
 }
 
 export interface Expense {
