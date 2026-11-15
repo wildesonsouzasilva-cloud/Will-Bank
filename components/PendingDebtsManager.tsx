@@ -57,6 +57,7 @@ export default function PendingDebtsManager({
   onDeleteDebt,
 }: PendingDebtsManagerProps) {
   const [filterType, setFilterType] = useState<"all" | "overdue" | "installments" | "bills" | "cards">("all");
+  const [monthScope, setMonthScope] = useState<"selected" | "all">("selected");
   const [selectedMember, setSelectedMember] = useState<string>("all");
   const [expandedScheduleId, setExpandedScheduleId] = useState<string | null>(null);
 
@@ -71,7 +72,7 @@ export default function PendingDebtsManager({
   const [totalInstallments, setTotalInstallments] = useState("12");
   const [paidInstallments, setPaidInstallments] = useState("0");
   const [installmentAmount, setInstallmentAmount] = useState("");
-  const [dueDate, setDueDate] = useState("2026-11-14");
+  const [dueDate, setDueDate] = useState(`${referenceMonth || "2026-11"}-14`);
   const [daysOverdue, setDaysOverdue] = useState("");
   const [interestRate, setInterestRate] = useState("");
   const [memberId, setMemberId] = useState(familyMembers[0]?.id || "");
@@ -82,6 +83,7 @@ export default function PendingDebtsManager({
     setCategory(mode === "overdue" ? "Empréstimo" : "Compra Parcelada");
     setTotalInstallments(mode === "overdue" ? "1" : "12");
     setPaidInstallments("0");
+    setDueDate(`${referenceMonth || "2026-11"}-15`);
     setMemberId(familyMembers[0]?.id || "");
     setShowDebtModal(true);
   };
@@ -157,44 +159,6 @@ export default function PendingDebtsManager({
     setNotes("");
   };
 
-  // Pendências de despesas normais
-  const pendingExpenses = expenses.filter((e) => e.status === "pending");
-  const cardsWithBalance = creditCards.filter((c) => c.used > 0);
-
-  // Dívidas cadastradas (endividamento atrasado e parcelamentos)
-  const overdueDebts = debts.filter(
-    (d) =>
-      d.debtMode === "overdue" &&
-      d.status !== "paid" &&
-      (selectedMember === "all" || d.memberId === selectedMember)
-  );
-
-  const installmentDebts = debts.filter(
-    (d) =>
-      d.debtMode === "installment" &&
-      d.status !== "paid" &&
-      (selectedMember === "all" || d.memberId === selectedMember)
-  );
-
-  const paidDebts = debts.filter(
-    (d) => d.status === "paid" && (selectedMember === "all" || d.memberId === selectedMember)
-  );
-
-  const getRemainingDebtAmount = (d: DebtRecord) => {
-    if (d.status === "paid") return 0;
-    if (d.totalInstallments <= 1) return d.totalAmount;
-    const remainingInstallments = Math.max(0, d.totalInstallments - d.paidInstallments);
-    return remainingInstallments * d.installmentAmount;
-  };
-
-  const totalPendingExpenses = pendingExpenses.reduce((acc, curr) => acc + curr.amount, 0);
-  const totalCardInvoices = cardsWithBalance.reduce((acc, curr) => acc + curr.used, 0);
-  const totalOverdueAmount = overdueDebts.reduce((acc, curr) => acc + getRemainingDebtAmount(curr), 0);
-  const totalInstallmentsRemaining = installmentDebts.reduce((acc, curr) => acc + getRemainingDebtAmount(curr), 0);
-
-  const totalDebtsToPay =
-    totalPendingExpenses + totalCardInvoices + totalOverdueAmount + totalInstallmentsRemaining;
-
   const buildDebtSchedule = (debt: DebtRecord) => {
     const items: Array<{
       installmentNumber: number;
@@ -219,6 +183,77 @@ export default function PendingDebtsManager({
     return items;
   };
 
+  // Pendências de despesas normais (respeitando mês de referência quando selecionado)
+  const allPendingExpenses = expenses.filter((e) => e.status === "pending");
+  const pendingExpenses =
+    referenceMonth && monthScope === "selected"
+      ? allPendingExpenses.filter((e) => getYearMonthKey(e.date) === referenceMonth)
+      : allPendingExpenses;
+
+  const cardsWithBalance = creditCards.filter((c) => c.used > 0);
+
+  // Dívidas cadastradas (endividamento atrasado e parcelamentos)
+  const allOverdueDebts = debts.filter(
+    (d) =>
+      d.debtMode === "overdue" &&
+      d.status !== "paid" &&
+      (selectedMember === "all" || d.memberId === selectedMember)
+  );
+
+  const overdueDebts =
+    referenceMonth && monthScope === "selected"
+      ? allOverdueDebts.filter((d) => {
+          const ym = getYearMonthKey(d.dueDate);
+          return !ym || ym <= referenceMonth;
+        })
+      : allOverdueDebts;
+
+  const allInstallmentDebts = debts.filter(
+    (d) =>
+      d.debtMode === "installment" &&
+      d.status !== "paid" &&
+      (selectedMember === "all" || d.memberId === selectedMember)
+  );
+
+  const installmentDebts =
+    referenceMonth && monthScope === "selected"
+      ? allInstallmentDebts.filter((d) =>
+          buildDebtSchedule(d).some((item) => !item.isPaid && item.yearMonth === referenceMonth)
+        )
+      : allInstallmentDebts;
+
+  const paidDebts = debts.filter(
+    (d) => d.status === "paid" && (selectedMember === "all" || d.memberId === selectedMember)
+  );
+
+  const getRemainingDebtAmount = (d: DebtRecord) => {
+    if (d.status === "paid") return 0;
+    if (d.totalInstallments <= 1) return d.totalAmount;
+    const remainingInstallments = Math.max(0, d.totalInstallments - d.paidInstallments);
+    return remainingInstallments * d.installmentAmount;
+  };
+
+  const getDebtMonthInstallment = (d: DebtRecord) => {
+    if (!referenceMonth) return null;
+    return (
+      buildDebtSchedule(d).find((item) => !item.isPaid && item.yearMonth === referenceMonth) || null
+    );
+  };
+
+  const totalPendingExpenses = pendingExpenses.reduce((acc, curr) => acc + curr.amount, 0);
+  const totalCardInvoices = cardsWithBalance.reduce((acc, curr) => acc + curr.used, 0);
+  const totalOverdueAmount = overdueDebts.reduce((acc, curr) => acc + getRemainingDebtAmount(curr), 0);
+  const totalInstallmentsRemaining =
+    referenceMonth && monthScope === "selected"
+      ? installmentDebts.reduce((acc, curr) => {
+          const item = getDebtMonthInstallment(curr);
+          return acc + (item ? item.amount : 0);
+        }, 0)
+      : installmentDebts.reduce((acc, curr) => acc + getRemainingDebtAmount(curr), 0);
+
+  const totalDebtsToPay =
+    totalPendingExpenses + totalCardInvoices + totalOverdueAmount + totalInstallmentsRemaining;
+
   // Agrupamento mês a mês das parcelas em aberto nos meses seguintes
   const monthlyDistributionMap = new Map<
     string,
@@ -238,10 +273,11 @@ export default function PendingDebtsManager({
     }
   >();
 
-  for (const debt of installmentDebts) {
+  for (const debt of allInstallmentDebts) {
     const schedule = buildDebtSchedule(debt);
     for (const item of schedule) {
       if (item.isPaid || !item.yearMonth) continue;
+      if (referenceMonth && monthScope === "selected" && item.yearMonth < referenceMonth) continue;
       const existingGroup = monthlyDistributionMap.get(item.yearMonth) || {
         yearMonth: item.yearMonth,
         totalAmount: 0,
@@ -352,18 +388,47 @@ export default function PendingDebtsManager({
             ))}
           </div>
 
-          <select
-            value={selectedMember}
-            onChange={(e) => setSelectedMember(e.target.value)}
-            className="px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs font-medium text-slate-700 outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            <option value="all">Todos os Membros</option>
-            {familyMembers.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.name}
-              </option>
-            ))}
-          </select>
+          <div className="flex flex-wrap items-center gap-2">
+            {referenceMonth && (
+              <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setMonthScope("selected")}
+                  className={`px-2.5 py-1 rounded-lg font-medium transition-colors ${
+                    monthScope === "selected"
+                      ? "bg-white text-indigo-700 shadow-xs font-semibold"
+                      : "text-slate-600 hover:text-slate-900"
+                  }`}
+                >
+                  Mês ({formatMonthYearPt(referenceMonth, true)})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMonthScope("all")}
+                  className={`px-2.5 py-1 rounded-lg font-medium transition-colors ${
+                    monthScope === "all"
+                      ? "bg-white text-slate-900 shadow-xs font-semibold"
+                      : "text-slate-600 hover:text-slate-900"
+                  }`}
+                >
+                  Todos os Meses
+                </button>
+              </div>
+            )}
+
+            <select
+              value={selectedMember}
+              onChange={(e) => setSelectedMember(e.target.value)}
+              className="px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs font-medium text-slate-700 outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="all">Todos os Membros</option>
+              {familyMembers.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
       </div>
 
@@ -371,12 +436,20 @@ export default function PendingDebtsManager({
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-gradient-to-br from-amber-500 to-rose-600 text-white p-5 rounded-2xl shadow-sm">
           <div className="flex items-center justify-between opacity-90 text-xs font-semibold uppercase tracking-wider">
-            <span>Passivo Total em Aberto</span>
+            <span>
+              {referenceMonth && monthScope === "selected"
+                ? `A Pagar (${formatMonthYearPt(referenceMonth, true)})`
+                : "Passivo Total em Aberto"}
+            </span>
             <AlertCircle className="w-5 h-5 text-amber-200" />
           </div>
           <div className="mt-3">
             <h4 className="text-2xl font-extrabold tracking-tight">{formatCurrency(totalDebtsToPay)}</h4>
-            <p className="text-xs text-amber-100 mt-1">Soma geral de tudo que falta quitar</p>
+            <p className="text-xs text-amber-100 mt-1">
+              {referenceMonth && monthScope === "selected"
+                ? `Contas, parcelas e faturas em ${formatMonthYearPt(referenceMonth)}`
+                : "Soma geral de tudo que falta quitar"}
+            </p>
           </div>
         </div>
 
@@ -397,7 +470,11 @@ export default function PendingDebtsManager({
 
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-indigo-600 uppercase tracking-wider">Saldo Parcelado</span>
+            <span className="text-xs font-semibold text-indigo-600 uppercase tracking-wider">
+              {referenceMonth && monthScope === "selected"
+                ? `Parcelas (${formatMonthYearPt(referenceMonth, true)})`
+                : "Saldo Parcelado"}
+            </span>
             <div className="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center">
               <Layers className="w-4 h-4" />
             </div>
@@ -406,7 +483,12 @@ export default function PendingDebtsManager({
             <h4 className="text-2xl font-bold text-slate-900 tracking-tight">
               {formatCurrency(totalInstallmentsRemaining)}
             </h4>
-            <p className="text-xs text-slate-500 mt-1">{installmentDebts.length} parcelamentos ativos</p>
+            <p className="text-xs text-slate-500 mt-1">
+              {installmentDebts.length}{" "}
+              {referenceMonth && monthScope === "selected"
+                ? "parcelamentos no mês"
+                : "parcelamentos ativos"}
+            </p>
           </div>
         </div>
 
@@ -544,7 +626,9 @@ export default function PendingDebtsManager({
           {installmentDebts.length === 0 ? (
             <div className="p-8 text-center text-slate-400 text-sm">
               <CheckCircle2 className="w-8 h-8 text-emerald-500 mx-auto mb-2" />
-              Nenhuma dívida parcelada em aberto!
+              {referenceMonth && monthScope === "selected"
+                ? `Nenhuma parcela com vencimento em ${formatMonthYearPt(referenceMonth)}.`
+                : "Nenhuma dívida parcelada em aberto!"}
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-5">
@@ -553,6 +637,8 @@ export default function PendingDebtsManager({
                 const remaining = getRemainingDebtAmount(debt);
                 const progress = (debt.paidInstallments / (debt.totalInstallments || 1)) * 100;
                 const nextInstallmentNumber = debt.paidInstallments + 1;
+                const monthInstallment =
+                  monthScope === "selected" ? getDebtMonthInstallment(debt) : null;
 
                 return (
                   <div
@@ -566,12 +652,14 @@ export default function PendingDebtsManager({
                             {debt.category}
                           </span>
                           <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-slate-200 text-slate-700">
-                            Parcela {nextInstallmentNumber}/{debt.totalInstallments}
+                            Parcela {monthInstallment ? monthInstallment.installmentNumber : nextInstallmentNumber}/{debt.totalInstallments}
                           </span>
                         </div>
                         <h5 className="font-bold text-slate-900 text-base">{debt.title}</h5>
                         <p className="text-xs text-slate-500">
-                          Credor: <strong className="text-slate-700">{debt.creditor}</strong> • Próx. Venc.: {formatDate(debt.dueDate)}
+                          Credor: <strong className="text-slate-700">{debt.creditor}</strong> &bull;{" "}
+                          {monthInstallment ? "Venc. no mês:" : "Próx. Venc.:"}{" "}
+                          {formatDate(monthInstallment ? monthInstallment.dueDate : debt.dueDate)}
                         </p>
                       </div>
                       <button

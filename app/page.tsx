@@ -19,7 +19,7 @@ import FinFamAiAssistant from "@/components/FinFamAiAssistant";
 import PendingDebtsManager from "@/components/PendingDebtsManager";
 
 import { auth, googleProvider, testFirestoreConnection } from "@/lib/firebase";
-import { addMonthsIso } from "@/lib/utils";
+import { addMonthsIso, getYearMonthKey } from "@/lib/utils";
 import {
   ensureWorkspaceInitialized,
   subscribeToWorkspace,
@@ -217,24 +217,60 @@ export default function Home() {
     );
   }
 
-  // Calculations
-  const totalIncome = incomes.reduce((acc, curr) => acc + curr.amount, 0);
-  const totalExpense = expenses.reduce((acc, curr) => acc + curr.amount, 0);
+  // Month-aware calculations (filters dynamically when user switches reference month/year)
+  const monthExpenses = expenses.filter((e) => getYearMonthKey(e.date) === month);
+  const monthIncomes = incomes.filter((i) => {
+    const incMonth = getYearMonthKey(i.date);
+    if (incMonth === month) return true;
+    return Boolean(i.isRecurring && incMonth && incMonth <= month);
+  });
+  const monthBudgets = budgets.map((b) => ({
+    ...b,
+    spent: monthExpenses
+      .filter((e) => e.category.toLowerCase() === b.category.toLowerCase())
+      .reduce((acc, e) => acc + e.amount, 0),
+  }));
+
+  const totalIncome = monthIncomes.reduce((acc, curr) => acc + curr.amount, 0);
+  const totalExpense = monthExpenses.reduce((acc, curr) => acc + curr.amount, 0);
   const balance = totalIncome - totalExpense;
   const savingsRate = totalIncome > 0 ? ((totalIncome - totalExpense) / totalIncome) * 100 : 0;
 
-  // Débitos a Pagar & Endividamentos
-  const pendingExpenses = expenses.filter((e) => e.status === "pending");
+  // Débitos a Pagar & Endividamentos no Mês de Referência
+  const pendingExpenses = monthExpenses.filter((e) => e.status === "pending");
   const pendingExpensesAmount = pendingExpenses.reduce((acc, curr) => acc + curr.amount, 0);
   const creditCardsUsedAmount = creditCards.reduce((acc, curr) => acc + curr.used, 0);
-  const activeDebts = debts.filter((d) => d.status !== "paid");
-  const activeDebtsAmount = activeDebts.reduce((acc, d) => {
-    if (d.totalInstallments <= 1) return acc + d.totalAmount;
-    return acc + Math.max(0, d.totalInstallments - d.paidInstallments) * d.installmentAmount;
-  }, 0);
-  const totalPendingDebts = pendingExpensesAmount + creditCardsUsedAmount + activeDebtsAmount;
+  const activeOverdueDebts = debts.filter((d) => {
+    if (d.debtMode !== "overdue" || d.status === "paid") return false;
+    const ym = getYearMonthKey(d.dueDate);
+    return !ym || ym <= month;
+  });
+  const activeOverdueAmount = activeOverdueDebts.reduce((acc, d) => acc + d.totalAmount, 0);
+
+  let monthInstallmentsDueAmount = 0;
+  let monthInstallmentsDueCount = 0;
+  for (const d of debts) {
+    if (d.debtMode !== "installment" || d.status === "paid") continue;
+    for (let k = d.paidInstallments + 1; k <= d.totalInstallments; k++) {
+      const offset = k - (d.paidInstallments + 1);
+      if (getYearMonthKey(addMonthsIso(d.dueDate, offset)) === month) {
+        monthInstallmentsDueAmount += d.installmentAmount;
+        monthInstallmentsDueCount += 1;
+        break;
+      }
+    }
+  }
+
+  const totalPendingDebts =
+    pendingExpensesAmount +
+    creditCardsUsedAmount +
+    activeOverdueAmount +
+    monthInstallmentsDueAmount;
   const pendingDebtsCount =
-    pendingExpenses.length + creditCards.filter((c) => c.used > 0).length + activeDebts.length;
+    pendingExpenses.length +
+    creditCards.filter((c) => c.used > 0).length +
+    activeOverdueDebts.length +
+    monthInstallmentsDueCount;
 
   // Handlers
   const handleMonthChange = (nextMonth: string) => {
@@ -541,26 +577,30 @@ export default function Home() {
             />
 
             <ChartsDashboard
-              expenses={expenses}
-              incomes={incomes}
-              budgets={budgets}
+              expenses={monthExpenses}
+              incomes={monthIncomes}
+              budgets={monthBudgets}
               familyMembers={familyMembers}
             />
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <ExpenseTable
-                expenses={expenses.slice(0, 5)}
+                expenses={expenses}
                 familyMembers={familyMembers}
                 creditCards={creditCards}
                 budgetCategories={budgets.map((b) => b.category)}
+                referenceMonth={month}
+                limitRows={5}
                 onAddExpense={handleAddExpense}
                 onAddExpenses={handleAddExpensesBatch}
                 onDeleteExpense={handleDeleteExpense}
                 onToggleStatus={handleToggleExpenseStatus}
               />
               <IncomeTable
-                incomes={incomes.slice(0, 5)}
+                incomes={incomes}
                 familyMembers={familyMembers}
+                referenceMonth={month}
+                limitRows={5}
                 onAddIncome={handleAddIncome}
                 onDeleteIncome={handleDeleteIncome}
               />
@@ -590,6 +630,7 @@ export default function Home() {
             familyMembers={familyMembers}
             creditCards={creditCards}
             budgetCategories={budgets.map((b) => b.category)}
+            referenceMonth={month}
             onAddExpense={handleAddExpense}
             onAddExpenses={handleAddExpensesBatch}
             onDeleteExpense={handleDeleteExpense}
@@ -601,13 +642,14 @@ export default function Home() {
           <IncomeTable
             incomes={incomes}
             familyMembers={familyMembers}
+            referenceMonth={month}
             onAddIncome={handleAddIncome}
             onDeleteIncome={handleDeleteIncome}
           />
         )}
 
         {activeTab === "budget" && (
-          <BudgetMonitor budgets={budgets} onUpdateBudget={handleUpdateBudgets} />
+          <BudgetMonitor budgets={monthBudgets} onUpdateBudget={handleUpdateBudgets} />
         )}
 
         {activeTab === "cards" && (
@@ -629,8 +671,8 @@ export default function Home() {
         {activeTab === "family" && (
           <FamilyMembersManager
             members={familyMembers}
-            expenses={expenses}
-            incomes={incomes}
+            expenses={monthExpenses}
+            incomes={monthIncomes}
             onAddMember={handleAddMember}
             onDeleteMember={handleDeleteMember}
           />
@@ -640,9 +682,9 @@ export default function Home() {
 
         {activeTab === "ai" && (
           <FinFamAiAssistant
-            expenses={expenses}
-            incomes={incomes}
-            budgets={budgets}
+            expenses={monthExpenses}
+            incomes={monthIncomes}
+            budgets={monthBudgets}
             goals={goals}
           />
         )}

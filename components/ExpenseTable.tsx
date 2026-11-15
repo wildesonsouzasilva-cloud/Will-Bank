@@ -10,6 +10,8 @@ interface ExpenseTableProps {
   familyMembers: FamilyMember[];
   creditCards: CreditCard[];
   budgetCategories?: string[];
+  referenceMonth?: string;
+  limitRows?: number;
   onAddExpense: (expense: Expense) => void;
   onAddExpenses?: (expenses: Expense[]) => void;
   onDeleteExpense: (id: string) => void;
@@ -21,22 +23,30 @@ export default function ExpenseTable({
   familyMembers,
   creditCards,
   budgetCategories = [],
+  referenceMonth,
+  limitRows,
   onAddExpense,
   onAddExpenses,
   onDeleteExpense,
   onToggleStatus,
 }: ExpenseTableProps) {
   const [showModal, setShowModal] = useState(false);
+  const [monthScope, setMonthScope] = useState<"selected" | "all">("selected");
   const [description, setDescription] = useState("");
   const [amount, setAmount] = useState("");
   const [category, setCategory] = useState("Alimentação");
   const [memberId, setMemberId] = useState(familyMembers[0]?.id || "");
-  const [date, setDate] = useState("2026-11-14");
+  const [date, setDate] = useState(`${referenceMonth || "2026-11"}-14`);
   const [paymentMethod, setPaymentMethod] = useState<Expense["paymentMethod"]>("pix");
   const [cardId, setCardId] = useState(creditCards[0]?.id || "");
   const [status, setStatus] = useState<Expense["status"]>("paid");
   const [isInstallment, setIsInstallment] = useState(false);
   const [installments, setInstallments] = useState("2");
+
+  const openModal = () => {
+    setDate(`${referenceMonth || "2026-11"}-14`);
+    setShowModal(true);
+  };
 
   const validMemberId = familyMembers.some((m) => m.id === memberId)
     ? memberId
@@ -105,20 +115,58 @@ export default function ExpenseTable({
   const defaultCategories = ["Moradia", "Alimentação", "Educação", "Saúde", "Transporte", "Lazer", "Outros"];
   const categories = Array.from(new Set([...budgetCategories, ...defaultCategories]));
 
+  const filteredExpenses =
+    referenceMonth && monthScope === "selected"
+      ? expenses.filter((e) => (e.date || "").slice(0, 7) === referenceMonth)
+      : expenses;
+  const visibleExpenses = limitRows ? filteredExpenses.slice(0, limitRows) : filteredExpenses;
+
   return (
     <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
       <div className="p-5 border-b border-slate-100 flex flex-wrap items-center justify-between gap-4">
         <div>
           <h3 className="font-bold text-slate-900 text-lg">Controle de Despesas</h3>
-          <p className="text-xs text-slate-500">Histórico de saídas e pagamentos da família</p>
+          <p className="text-xs text-slate-500">
+            {referenceMonth && monthScope === "selected"
+              ? `Lançamentos de ${formatMonthYearPt(referenceMonth)}`
+              : "Histórico completo de saídas e pagamentos da família"}
+          </p>
         </div>
-        <button
-          onClick={() => setShowModal(true)}
-          className="inline-flex items-center gap-2 px-4 py-2 bg-rose-600 text-white rounded-xl text-xs sm:text-sm font-semibold hover:bg-rose-700 transition-colors shadow-xs"
-        >
-          <Plus className="w-4 h-4" />
-          Nova Despesa
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          {referenceMonth && (
+            <div className="flex items-center bg-slate-100 p-0.5 rounded-xl border border-slate-200 text-xs">
+              <button
+                type="button"
+                onClick={() => setMonthScope("selected")}
+                className={`px-2.5 py-1 rounded-lg font-medium transition-colors ${
+                  monthScope === "selected"
+                    ? "bg-white text-slate-900 shadow-xs font-semibold"
+                    : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                {formatMonthYearPt(referenceMonth, true)}
+              </button>
+              <button
+                type="button"
+                onClick={() => setMonthScope("all")}
+                className={`px-2.5 py-1 rounded-lg font-medium transition-colors ${
+                  monthScope === "all"
+                    ? "bg-white text-slate-900 shadow-xs font-semibold"
+                    : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                Todos
+              </button>
+            </div>
+          )}
+          <button
+            onClick={openModal}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-rose-600 text-white rounded-xl text-xs sm:text-sm font-semibold hover:bg-rose-700 transition-colors shadow-xs"
+          >
+            <Plus className="w-4 h-4" />
+            Nova Despesa
+          </button>
+        </div>
       </div>
 
       <div className="overflow-x-auto">
@@ -136,7 +184,16 @@ export default function ExpenseTable({
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {expenses.map((expense) => {
+            {visibleExpenses.length === 0 ? (
+              <tr>
+                <td colSpan={8} className="px-6 py-10 text-center text-xs sm:text-sm text-slate-400">
+                  {referenceMonth && monthScope === "selected"
+                    ? `Nenhuma despesa registrada em ${formatMonthYearPt(referenceMonth)}.`
+                    : "Nenhuma despesa cadastrada."}
+                </td>
+              </tr>
+            ) : (
+            visibleExpenses.map((expense) => {
               const member = familyMembers.find((m) => m.id === expense.memberId);
               const card = creditCards.find((c) => c.id === expense.cardId);
 
@@ -212,7 +269,8 @@ export default function ExpenseTable({
                   </td>
                 </tr>
               );
-            })}
+            })
+            )}
           </tbody>
         </table>
       </div>
