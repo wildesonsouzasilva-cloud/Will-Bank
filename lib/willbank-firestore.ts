@@ -406,6 +406,33 @@ export function subscribeToWorkspace(uid: string, callbacks: WorkspaceCallbacks)
   const unsubscribers: Unsubscribe[] = [];
   const userPath = `users/${uid}`;
 
+  let userReady = false;
+  let familyReady = false;
+  let cardsReady = false;
+  let incomesReady = false;
+  let expensesReady = false;
+  let budgetsReady = false;
+  let goalsReady = false;
+  let debtsReady = false;
+  let syncEmitted = false;
+
+  const checkSyncReady = () => {
+    if (
+      !syncEmitted &&
+      userReady &&
+      familyReady &&
+      cardsReady &&
+      incomesReady &&
+      expensesReady &&
+      budgetsReady &&
+      goalsReady &&
+      debtsReady
+    ) {
+      syncEmitted = true;
+      callbacks.onSyncReady?.();
+    }
+  };
+
   unsubscribers.push(
     onSnapshot(
       doc(db, "users", uid),
@@ -427,7 +454,8 @@ export function subscribeToWorkspace(uid: string, callbacks: WorkspaceCallbacks)
                 : "Dízimo",
           });
         }
-        callbacks.onSyncReady?.();
+        userReady = true;
+        checkSyncReady();
       },
       (error) => {
         handleFirestoreError(error, OperationType.GET, userPath);
@@ -454,6 +482,8 @@ export function subscribeToWorkspace(uid: string, callbacks: WorkspaceCallbacks)
             ...(typeof data.incomeShare === "number" ? { incomeShare: data.incomeShare } : {}),
           }));
         callbacks.onFamilyMembers(list);
+        familyReady = true;
+        checkSyncReady();
       },
       (error) => {
         handleFirestoreError(error, OperationType.LIST, `${userPath}/familyMembers`);
@@ -480,6 +510,8 @@ export function subscribeToWorkspace(uid: string, callbacks: WorkspaceCallbacks)
             dueDay: Number(data.dueDay),
           }));
         callbacks.onCreditCards(list);
+        cardsReady = true;
+        checkSyncReady();
       },
       (error) => {
         handleFirestoreError(error, OperationType.LIST, `${userPath}/creditCards`);
@@ -505,6 +537,8 @@ export function subscribeToWorkspace(uid: string, callbacks: WorkspaceCallbacks)
             ...(typeof data.isRecurring === "boolean" ? { isRecurring: data.isRecurring } : {}),
           }));
         callbacks.onIncomes(list);
+        incomesReady = true;
+        checkSyncReady();
       },
       (error) => {
         handleFirestoreError(error, OperationType.LIST, `${userPath}/incomes`);
@@ -536,6 +570,8 @@ export function subscribeToWorkspace(uid: string, callbacks: WorkspaceCallbacks)
             ...(data.sourceIncomeId ? { sourceIncomeId: String(data.sourceIncomeId) } : {}),
           }));
         callbacks.onExpenses(list);
+        expensesReady = true;
+        checkSyncReady();
       },
       (error) => {
         handleFirestoreError(error, OperationType.LIST, `${userPath}/expenses`);
@@ -558,6 +594,8 @@ export function subscribeToWorkspace(uid: string, callbacks: WorkspaceCallbacks)
             color: String(data.color),
           }));
         callbacks.onBudgets(list);
+        budgetsReady = true;
+        checkSyncReady();
       },
       (error) => {
         handleFirestoreError(error, OperationType.LIST, `${userPath}/budgets`);
@@ -582,6 +620,8 @@ export function subscribeToWorkspace(uid: string, callbacks: WorkspaceCallbacks)
             color: String(data.color),
           }));
         callbacks.onGoals(list);
+        goalsReady = true;
+        checkSyncReady();
       },
       (error) => {
         handleFirestoreError(error, OperationType.LIST, `${userPath}/goals`);
@@ -595,7 +635,7 @@ export function subscribeToWorkspace(uid: string, callbacks: WorkspaceCallbacks)
       (snap) => {
         const list = snap.docs
           .map((d) => ({ data: d.data(), ts: toTimestampMs(d.data().createdAt) }))
-          .sort((a, b) => b.ts - a.ts)
+          .sort((a, b) => b.ts - b.ts)
           .map(({ data }) => ({
             id: String(data.id),
             title: String(data.title),
@@ -617,6 +657,8 @@ export function subscribeToWorkspace(uid: string, callbacks: WorkspaceCallbacks)
             ...(typeof data.notes === "string" ? { notes: data.notes } : {}),
           }));
         callbacks.onDebts(list);
+        debtsReady = true;
+        checkSyncReady();
       },
       (error) => {
         handleFirestoreError(error, OperationType.LIST, `${userPath}/debts`);

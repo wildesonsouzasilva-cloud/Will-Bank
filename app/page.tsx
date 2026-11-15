@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { onAuthStateChanged, signInWithPopup, signOut, User } from "firebase/auth";
 import { Loader2, AlertTriangle } from "lucide-react";
 
@@ -84,6 +84,48 @@ function getIncomeReceiptDateForMonth(income: Income, activeMonth: string): stri
   return income.date;
 }
 
+function getSkippedTitheStorageKey(uid: string): string {
+  return `willbank_skipped_tithes_${uid}`;
+}
+
+function readSkippedTithes(uid: string): string[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(getSkippedTitheStorageKey(uid));
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed)
+      ? parsed.filter((item): item is string => typeof item === "string")
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeSkippedTithes(uid: string, ids: string[]): void {
+  if (typeof window === "undefined") return;
+  try {
+    const deduped = Array.from(new Set(ids)).slice(-500);
+    window.localStorage.setItem(getSkippedTitheStorageKey(uid), JSON.stringify(deduped));
+  } catch {
+    // Ignore storage quota or private mode failures
+  }
+}
+
+function findTitheExpenseForIncome(
+  expensesList: Expense[],
+  income: Income,
+  targetYm: string
+): Expense | undefined {
+  const titheId = buildTitheExpenseId(income.id, targetYm);
+  return expensesList.find(
+    (e) =>
+      e.id === titheId ||
+      (e.sourceIncomeId === income.id &&
+        (!income.isRecurring || getYearMonthKey(e.date) === targetYm))
+  );
+}
+
 function formatAuthErrorMessage(err: unknown): string {
   const code = (err as { code?: string })?.code || "";
   if (code === "auth/popup-closed-by-user") {
@@ -122,6 +164,11 @@ export default function Home() {
   const [budgets, setBudgets] = useState<BudgetCategory[]>([]);
   const [goals, setGoals] = useState<FinancialGoal[]>([]);
   const [debts, setDebts] = useState<DebtRecord[]>([]);
+  const [skippedTitheIds, setSkippedTitheIds] = useState<string[]>([]);
+
+  const inFlightAutoTithesRef = useRef<Set<string>>(new Set());
+  const autoLaunchMissingRef = useRef<Expense[]>([]);
+  const addExpensesBatchRef = useRef<(items: Expense[]) => void>(() => {});
 
   useEffect(() => {
     testFirestoreConnection();
@@ -137,6 +184,8 @@ export default function Home() {
         setBudgets([]);
         setGoals([]);
         setDebts([]);
+        setSkippedTitheIds([]);
+        inFlightAutoTithesRef.current.clear();
         setIsLoadingWorkspace(false);
       }
     });
@@ -149,6 +198,8 @@ export default function Home() {
     let cancelled = false;
     let unsubscribeData: (() => void) | null = null;
     const uid = user.uid;
+    inFlightAutoTithesRef.current.clear();
+    setSkippedTitheIds(readSkippedTithes(uid));
 
     const initAndSubscribe = async () => {
       setIsLoadingWorkspace(true);
@@ -191,6 +242,58 @@ export default function Home() {
       }
     };
   }, [isAuthReady, user]);
+
+  const skippedTitheSet = new Set(skippedTitheIds);
+  const monthExpenses = expenses.filter((e) => getYearMonthKey(e.date) === month);
+  const monthIncomes = incomes.filter((i) => {
+    const incMonth = getYearMonthKey(i.date);
+    if (incMonth === month) return true;
+    return Boolean(i.isRecurring && incMonth && incMonth <= month);
+  });
+
+  const autoLaunchMissing: Expense[] = [];
+  if (isAuthReady && user && !isLoadingWorkspace && titheConfig.enabled && titheConfig.percentage > 0) {
+    for (const inc of monthIncomes) {
+      if (inc.amount <= 0) continue;
+      const targetDate = getIncomeReceiptDateForMonth(inc, month);
+      const targetYm = getYearMonthKey(targetDate) || month;
+      const titheId = buildTitheExpenseId(inc.id, targetYm);
+      if (skippedTitheSet.has(titheId)) continue;
+      const existing = findTitheExpenseForIncome(expenses, inc, targetYm);
+      if (existing) continue;
+      const titheAmount = Number(((inc.amount * titheConfig.percentage) / 100).toFixed(2));
+      if (titheAmount <= 0) continue;
+      autoLaunchMissing.push({
+        id: titheId,
+        description: `Dízimo (${titheConfig.percentage}%) - ${inc.description}`.slice(0, 160),
+        amount: titheAmount,
+        date: targetDate,
+        category: titheConfig.category,
+        memberId: inc.memberId,
+        paymentMethod: "pix",
+        status: "pending",
+        sourceIncomeId: inc.id,
+      });
+    }
+  }
+  autoLaunchMissingRef.current = autoLaunchMissing;
+
+  const autoTitheMissingKey = autoLaunchMissing
+    .map((item) => `${item.id}:${item.amount}:${item.category}:${item.date}`)
+    .join("|");
+
+  useEffect(() => {
+    if (!isAuthReady || isLoadingWorkspace || !user?.uid || !autoTitheMissingKey) return;
+    const pendingToCreate = autoLaunchMissingRef.current.filter(
+      (item) => !inFlightAutoTithesRef.current.has(item.id)
+    );
+    if (pendingToCreate.length === 0) return;
+
+    for (const item of pendingToCreate) {
+      inFlightAutoTithesRef.current.add(item.id);
+    }
+    addExpensesBatchRef.current(pendingToCreate);
+  }, [isAuthReady, isLoadingWorkspace, user?.uid, autoTitheMissingKey]);
 
   const handleSignIn = useCallback(async () => {
     setIsSigningIn(true);
@@ -249,8 +352,6 @@ export default function Home() {
   }
 
   // Month-aware calculations (filters dynamically when user switches reference month/year)
-  const monthExpenses = expenses.filter((e) => getYearMonthKey(e.date) === month);
-
   const monthDebtOutflows: Expense[] = [];
   for (const d of debts) {
     if (d.debtMode === "installment") {
@@ -290,12 +391,6 @@ export default function Home() {
   }
 
   const monthAllOutflows = [...monthExpenses, ...monthDebtOutflows];
-
-  const monthIncomes = incomes.filter((i) => {
-    const incMonth = getYearMonthKey(i.date);
-    if (incMonth === month) return true;
-    return Boolean(i.isRecurring && incMonth && incMonth <= month);
-  });
   const monthBudgets = budgets.map((b) => ({
     ...b,
     spent: monthAllOutflows
@@ -314,15 +409,21 @@ export default function Home() {
   const installmentExpenseTotal = monthAllOutflows
     .filter((e) => Boolean(e.installments && e.installments > 1))
     .reduce((acc, curr) => acc + curr.amount, 0);
-  const titheExpenseTotal = monthExpenses
-    .filter(
-      (e) =>
-        Boolean(e.sourceIncomeId) ||
-        (titheConfig.category &&
-          e.category.toLowerCase() === titheConfig.category.toLowerCase() &&
-          e.description.toLowerCase().startsWith("dízimo"))
-    )
+  const monthTitheExpenses = monthExpenses.filter(
+    (e) =>
+      Boolean(e.sourceIncomeId) ||
+      (titheConfig.category &&
+        e.category.toLowerCase() === titheConfig.category.toLowerCase() &&
+        e.description.toLowerCase().startsWith("dízimo"))
+  );
+  const titheExpenseTotal = monthTitheExpenses.reduce((acc, curr) => acc + curr.amount, 0);
+  const tithePendingTotal = monthTitheExpenses
+    .filter((e) => e.status === "pending")
     .reduce((acc, curr) => acc + curr.amount, 0);
+  const projectedTitheTotal =
+    titheConfig.percentage > 0
+      ? Number(((totalIncome * titheConfig.percentage) / 100).toFixed(2))
+      : 0;
   const monthPaidOutflowsAmount = monthAllOutflows
     .filter((e) => e.status === "paid")
     .reduce((acc, curr) => acc + curr.amount, 0);
@@ -353,20 +454,17 @@ export default function Home() {
   const pendingTitheSyncCount =
     titheConfig.enabled && titheConfig.percentage > 0
       ? monthIncomes.filter((inc) => {
-          if (inc.status === "pending" || inc.amount <= 0) return false;
+          if (inc.amount <= 0) return false;
           const targetDate = getIncomeReceiptDateForMonth(inc, month);
           const targetYm = getYearMonthKey(targetDate) || month;
-          const existing = monthExpenses.find(
-            (e) =>
-              e.sourceIncomeId === inc.id ||
-              e.id === buildTitheExpenseId(inc.id, targetYm)
-          );
+          const existing = findTitheExpenseForIncome(expenses, inc, targetYm);
           const expectedAmt = Number(((inc.amount * titheConfig.percentage) / 100).toFixed(2));
           if (expectedAmt <= 0) return false;
           if (!existing) return true;
           return (
             Math.abs(existing.amount - expectedAmt) > 0.01 ||
-            existing.category !== titheConfig.category
+            existing.category !== titheConfig.category ||
+            existing.date !== targetDate
           );
         }).length
       : 0;
@@ -480,10 +578,36 @@ export default function Home() {
       addExpensesBatchInCloud(user.uid, newExpenses, matchingBudget, matchingCard)
     );
   };
+  addExpensesBatchRef.current = handleAddExpensesBatch;
+
+  const markTitheSkipped = (titheId: string) => {
+    setSkippedTitheIds((prev) => {
+      if (prev.includes(titheId)) return prev;
+      const next = [...prev, titheId];
+      writeSkippedTithes(user.uid, next);
+      return next;
+    });
+  };
+
+  const unmarkTithesSkipped = (titheIds: string[]) => {
+    if (titheIds.length === 0) return;
+    const removeSet = new Set(titheIds);
+    setSkippedTitheIds((prev) => {
+      if (!prev.some((id) => removeSet.has(id))) return prev;
+      const next = prev.filter((id) => !removeSet.has(id));
+      writeSkippedTithes(user.uid, next);
+      return next;
+    });
+  };
 
   const handleDeleteExpense = (id: string) => {
     const exp = expenses.find((e) => e.id === id);
     if (!exp) return;
+
+    if (exp.sourceIncomeId || exp.id.startsWith("tithe-")) {
+      markTitheSkipped(exp.id);
+      inFlightAutoTithesRef.current.delete(exp.id);
+    }
 
     const matchingBudget = budgets.find(
       (b) => b.category.toLowerCase() === exp.category.toLowerCase()
@@ -598,21 +722,19 @@ export default function Home() {
     );
   };
 
-  const syncTitheForIncome = (income: Income, nextStatus: "received" | "pending") => {
+  const syncTitheForIncome = (
+    income: Income,
+    nextStatus: "received" | "pending",
+    forceStatus = true
+  ) => {
     const targetDate = getIncomeReceiptDateForMonth(income, month);
     const targetYm = getYearMonthKey(targetDate) || month;
     const titheId = buildTitheExpenseId(income.id, targetYm);
-    const existingTithe = expenses.find(
-      (e) =>
-        e.id === titheId ||
-        (e.sourceIncomeId === income.id &&
-          (!income.isRecurring || getYearMonthKey(e.date) === targetYm))
-    );
+    const existingTithe = findTitheExpenseForIncome(expenses, income, targetYm);
 
     const shouldHaveTithe =
       titheConfig.enabled &&
       titheConfig.percentage > 0 &&
-      nextStatus === "received" &&
       income.amount > 0;
 
     if (shouldHaveTithe) {
@@ -621,6 +743,14 @@ export default function Home() {
         if (existingTithe) handleDeleteExpense(existingTithe.id);
         return;
       }
+      unmarkTithesSkipped([titheId]);
+      inFlightAutoTithesRef.current.delete(titheId);
+      const nextTitheStatus: Expense["status"] =
+        forceStatus || !existingTithe
+          ? nextStatus === "pending"
+            ? "pending"
+            : "paid"
+          : existingTithe.status;
       const titheDescription = `Dízimo (${titheConfig.percentage}%) - ${income.description}`.slice(
         0,
         160
@@ -634,7 +764,7 @@ export default function Home() {
           category: titheConfig.category,
           memberId: income.memberId,
           paymentMethod: "pix",
-          status: "paid",
+          status: nextTitheStatus,
           sourceIncomeId: income.id,
         };
         handleEditExpense(existingTithe, updatedTithe);
@@ -647,7 +777,7 @@ export default function Home() {
           category: titheConfig.category,
           memberId: income.memberId,
           paymentMethod: "pix",
-          status: "paid",
+          status: nextTitheStatus,
           sourceIncomeId: income.id,
         };
         handleAddExpense(newTithe);
@@ -657,50 +787,48 @@ export default function Home() {
     }
   };
 
-  const handleSaveTitheConfig = (nextConfig: TitheConfig) => {
-    setTitheConfig(nextConfig);
-    void runCloudAction(() => updateTitheConfigInCloud(user.uid, nextConfig));
-  };
+  const handleSyncMonthTithes = (configOverride?: TitheConfig) => {
+    const activeConfig = configOverride ?? titheConfig;
+    if (!activeConfig.enabled || activeConfig.percentage <= 0) return;
 
-  const handleSyncMonthTithes = () => {
-    if (!titheConfig.enabled || titheConfig.percentage <= 0) return;
-
+    const isManualSync = !configOverride;
     const toCreate: Expense[] = [];
     const toUpdate: Array<{ prev: Expense; next: Expense }> = [];
+    const unskipIds: string[] = [];
 
     for (const inc of monthIncomes) {
-      if (inc.status === "pending" || inc.amount <= 0) continue;
+      if (inc.amount <= 0) continue;
       const targetDate = getIncomeReceiptDateForMonth(inc, month);
       const targetYm = getYearMonthKey(targetDate) || month;
       const titheId = buildTitheExpenseId(inc.id, targetYm);
-      const existing = expenses.find(
-        (e) =>
-          e.id === titheId ||
-          (e.sourceIncomeId === inc.id && getYearMonthKey(e.date) === targetYm)
-      );
-      const titheAmount = Number(((inc.amount * titheConfig.percentage) / 100).toFixed(2));
+      const existing = findTitheExpenseForIncome(expenses, inc, targetYm);
+      const titheAmount = Number(((inc.amount * activeConfig.percentage) / 100).toFixed(2));
       if (titheAmount <= 0) continue;
-      const titheDescription = `Dízimo (${titheConfig.percentage}%) - ${inc.description}`.slice(
+      const titheDescription = `Dízimo (${activeConfig.percentage}%) - ${inc.description}`.slice(
         0,
         160
       );
 
       if (!existing) {
+        if (!isManualSync && skippedTitheSet.has(titheId)) continue;
+        unskipIds.push(titheId);
+        inFlightAutoTithesRef.current.add(titheId);
         toCreate.push({
           id: titheId,
           description: titheDescription,
           amount: titheAmount,
           date: targetDate,
-          category: titheConfig.category,
+          category: activeConfig.category,
           memberId: inc.memberId,
           paymentMethod: "pix",
-          status: "paid",
+          status: "pending",
           sourceIncomeId: inc.id,
         });
       } else if (
         Math.abs(existing.amount - titheAmount) > 0.01 ||
-        existing.category !== titheConfig.category ||
-        existing.description !== titheDescription
+        existing.category !== activeConfig.category ||
+        existing.description !== titheDescription ||
+        existing.date !== targetDate
       ) {
         toUpdate.push({
           prev: existing,
@@ -709,14 +837,18 @@ export default function Home() {
             description: titheDescription,
             amount: titheAmount,
             date: targetDate,
-            category: titheConfig.category,
+            category: activeConfig.category,
             memberId: inc.memberId,
             paymentMethod: "pix",
-            status: "paid",
+            status: existing.status,
             sourceIncomeId: inc.id,
           },
         });
       }
+    }
+
+    if (unskipIds.length > 0) {
+      unmarkTithesSkipped(unskipIds);
     }
 
     if (toCreate.length > 0) {
@@ -759,19 +891,28 @@ export default function Home() {
     }
   };
 
+  const handleSaveTitheConfig = (nextConfig: TitheConfig) => {
+    setTitheConfig(nextConfig);
+    void runCloudAction(() => updateTitheConfigInCloud(user.uid, nextConfig));
+    if (nextConfig.enabled && nextConfig.percentage > 0) {
+      handleSyncMonthTithes(nextConfig);
+    }
+  };
+
   const handleAddIncome = (newIncome: Income) => {
     setIncomes((prev) => [newIncome, ...prev]);
     void runCloudAction(() => addIncomeInCloud(user.uid, newIncome));
-    syncTitheForIncome(newIncome, newIncome.status === "pending" ? "pending" : "received");
+    syncTitheForIncome(newIncome, newIncome.status === "pending" ? "pending" : "received", true);
   };
 
   const handleEditIncome = (updatedIncome: Income) => {
+    const prevIncome = incomes.find((i) => i.id === updatedIncome.id);
+    const nextStatus = updatedIncome.status === "pending" ? "pending" : "received";
+    const statusChanged = prevIncome ? prevIncome.status !== nextStatus : true;
+
     setIncomes((prev) => prev.map((i) => (i.id === updatedIncome.id ? updatedIncome : i)));
     void runCloudAction(() => updateIncomeInCloud(user.uid, updatedIncome));
-    syncTitheForIncome(
-      updatedIncome,
-      updatedIncome.status === "pending" ? "pending" : "received"
-    );
+    syncTitheForIncome(updatedIncome, nextStatus, statusChanged);
   };
 
   const handleDeleteIncome = (id: string) => {
@@ -913,11 +1054,17 @@ export default function Home() {
     setBudgets((prev) => prev.map((b) => ({ ...b, spent: 0 })));
     setGoals([]);
     setDebts([]);
+    setSkippedTitheIds([]);
+    writeSkippedTithes(user.uid, []);
+    inFlightAutoTithesRef.current.clear();
     setConfirmAction(null);
     void runCloudAction(() => clearAllCloudData(user.uid, currentBudgets));
   };
 
   const handleRestoreDemoData = () => {
+    setSkippedTitheIds([]);
+    writeSkippedTithes(user.uid, []);
+    inFlightAutoTithesRef.current.clear();
     setConfirmAction(null);
     void runCloudAction(() => restoreDemoCloudData(user.uid));
   };
@@ -964,6 +1111,8 @@ export default function Home() {
               totalExpense={totalExpense}
               installmentExpenseTotal={installmentExpenseTotal}
               titheExpenseTotal={titheExpenseTotal}
+              tithePendingTotal={tithePendingTotal}
+              projectedTitheTotal={projectedTitheTotal}
               balance={balance}
               cashBalance={cashBalance}
               pendingAmount={monthPendingOutflowsAmount}
@@ -977,12 +1126,14 @@ export default function Home() {
               config={titheConfig}
               availableCategories={availableCategoriesForTithe}
               receivedIncomeMonthTotal={receivedIncome}
+              pendingIncomeMonthTotal={pendingIncome}
               monthTitheTotal={titheExpenseTotal}
+              monthTithePendingTotal={tithePendingTotal}
               pendingSyncCount={pendingTitheSyncCount}
               referenceMonth={month}
               compact
               onSaveConfig={handleSaveTitheConfig}
-              onSyncMonthTithes={handleSyncMonthTithes}
+              onSyncMonthTithes={() => handleSyncMonthTithes()}
             />
 
             <ChartsDashboard
@@ -1065,11 +1216,13 @@ export default function Home() {
               config={titheConfig}
               availableCategories={availableCategoriesForTithe}
               receivedIncomeMonthTotal={receivedIncome}
+              pendingIncomeMonthTotal={pendingIncome}
               monthTitheTotal={titheExpenseTotal}
+              monthTithePendingTotal={tithePendingTotal}
               pendingSyncCount={pendingTitheSyncCount}
               referenceMonth={month}
               onSaveConfig={handleSaveTitheConfig}
-              onSyncMonthTithes={handleSyncMonthTithes}
+              onSyncMonthTithes={() => handleSyncMonthTithes()}
             />
             <IncomeTable
               incomes={incomes}

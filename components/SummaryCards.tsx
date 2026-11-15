@@ -19,6 +19,8 @@ interface SummaryCardsProps {
   totalExpense: number;
   installmentExpenseTotal?: number;
   titheExpenseTotal?: number;
+  tithePendingTotal?: number;
+  projectedTitheTotal?: number;
   balance: number;
   cashBalance?: number;
   pendingAmount?: number;
@@ -35,6 +37,8 @@ export default function SummaryCards({
   totalExpense,
   installmentExpenseTotal = 0,
   titheExpenseTotal = 0,
+  tithePendingTotal = 0,
+  projectedTitheTotal = 0,
   balance,
   cashBalance,
   pendingAmount = 0,
@@ -102,11 +106,31 @@ export default function SummaryCards({
                 <Layers className="w-3 h-3" />
                 Parceladas: {formatCurrency(installmentExpenseTotal)}
               </span>
-              {titheExpenseTotal > 0 && (
-                <span className="inline-flex items-center text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md">
+              {titheExpenseTotal > 0 ? (
+                <span
+                  className={`inline-flex items-center text-[11px] font-semibold px-2 py-0.5 rounded-md ${
+                    tithePendingTotal > 0 && tithePendingTotal >= titheExpenseTotal - 0.01
+                      ? "text-amber-700 bg-amber-50"
+                      : "text-emerald-700 bg-emerald-50"
+                  }`}
+                >
                   Dízimo: {formatCurrency(titheExpenseTotal)}
+                  {tithePendingTotal > 0 && (
+                    <span className="ml-1 text-amber-700">
+                      ({formatCurrency(tithePendingTotal)} a pagar)
+                    </span>
+                  )}
+                  {projectedTitheTotal > titheExpenseTotal + 0.01 && (
+                    <span className="ml-1 text-indigo-700">
+                      (prev. {formatCurrency(projectedTitheTotal)})
+                    </span>
+                  )}
                 </span>
-              )}
+              ) : projectedTitheTotal > 0 ? (
+                <span className="inline-flex items-center text-[11px] font-semibold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-md">
+                  Dízimo previsto: {formatCurrency(projectedTitheTotal)}
+                </span>
+              ) : null}
             </div>
             {pendingAmount > 0 ? (
               <span className="text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md font-semibold text-[11px]">

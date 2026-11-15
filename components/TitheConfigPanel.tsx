@@ -17,7 +17,9 @@ interface TitheConfigPanelProps {
   config: TitheConfig;
   availableCategories: string[];
   receivedIncomeMonthTotal: number;
+  pendingIncomeMonthTotal?: number;
   monthTitheTotal: number;
+  monthTithePendingTotal?: number;
   pendingSyncCount: number;
   referenceMonth: string;
   compact?: boolean;
@@ -31,7 +33,9 @@ export default function TitheConfigPanel({
   config,
   availableCategories,
   receivedIncomeMonthTotal,
+  pendingIncomeMonthTotal = 0,
   monthTitheTotal,
+  monthTithePendingTotal = 0,
   pendingSyncCount,
   referenceMonth,
   compact = false,
@@ -55,7 +59,10 @@ export default function TitheConfigPanel({
   );
 
   const parsedPct = Math.min(100, Math.max(0, Number.isFinite(parseFloat(percentageInput)) ? parseFloat(percentageInput) : 0));
-  const expectedMonthTithe = enabled ? (receivedIncomeMonthTotal * parsedPct) / 100 : 0;
+  const totalIncomeMonth = receivedIncomeMonthTotal + pendingIncomeMonthTotal;
+  const projectedMonthTithe = (totalIncomeMonth * parsedPct) / 100;
+  const titheOnReceived = (receivedIncomeMonthTotal * parsedPct) / 100;
+  const titheOnPending = (pendingIncomeMonthTotal * parsedPct) / 100;
 
   const isDirty =
     enabled !== config.enabled ||
@@ -109,18 +116,38 @@ export default function TitheConfigPanel({
               </span>
             </div>
             <p className="text-xs text-slate-500 mt-0.5">
-              Toda entrada marcada como <strong>Recebido</strong> registra e abate automaticamente{" "}
-              <strong>{config.percentage}%</strong> como despesa em{" "}
+              O dízimo previsto (<strong>{config.percentage}%</strong>) é lançado automaticamente como despesa{" "}
+              <strong>A Pagar</strong> e atualizado para <strong>Pago</strong> ao receber a entrada em{" "}
               <strong>{formatMonthYearPt(referenceMonth)}</strong>.
             </p>
           </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <div className="px-3 py-1.5 rounded-xl bg-rose-50 border border-rose-100 text-xs">
-            <span className="text-slate-600">Abatido no mês: </span>
-            <strong className="text-rose-700">{formatCurrency(monthTitheTotal)}</strong>
+          <div className="px-3 py-1.5 rounded-xl bg-indigo-50 border border-indigo-100 text-xs">
+            <span className="text-slate-600">Dízimo previsto ({parsedPct}%): </span>
+            <strong className="text-indigo-700">{formatCurrency(projectedMonthTithe)}</strong>
           </div>
+          <div className="px-3 py-1.5 rounded-xl bg-rose-50 border border-rose-100 text-xs">
+            <span className="text-slate-600">Lançado nas despesas: </span>
+            <strong className="text-rose-700">{formatCurrency(monthTitheTotal)}</strong>
+            {monthTithePendingTotal > 0 && (
+              <span className="text-[11px] text-amber-700 font-semibold ml-1">
+                ({formatCurrency(monthTithePendingTotal)} a pagar)
+              </span>
+            )}
+          </div>
+
+          {config.enabled && config.percentage > 0 && pendingSyncCount > 0 && !isDirty && (
+            <button
+              type="button"
+              onClick={onSyncMonthTithes}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold transition-colors shadow-xs"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              Sincronizar dízimo ({pendingSyncCount})
+            </button>
+          )}
 
           {compact && (
             <button
@@ -151,7 +178,7 @@ export default function TitheConfigPanel({
                   Lançamento Automático
                 </span>
                 <p className="text-[11px] text-slate-500 mt-0.5 leading-relaxed">
-                  Gera e abate o dízimo na soma final sempre que uma receita for marcada como recebida.
+                  Lança automaticamente o dízimo previsto como despesa a pagar e atualiza para pago na soma final ao receber a receita.
                 </p>
               </div>
               <div className="grid grid-cols-2 gap-1.5 pt-1">
@@ -250,15 +277,36 @@ export default function TitheConfigPanel({
 
           {/* Prévia de Cálculo + Ações */}
           <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-100">
-            <div className="flex flex-wrap items-center gap-3 text-xs">
+            <div className="flex flex-wrap items-center gap-2 text-xs">
               <span className="px-2.5 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 font-medium">
-                Recebido no mês: <strong>{formatCurrency(receivedIncomeMonthTotal)}</strong>
+                Receitas do mês: <strong>{formatCurrency(totalIncomeMonth)}</strong>
+                {pendingIncomeMonthTotal > 0 && (
+                  <span className="text-[11px] text-emerald-700/80 ml-1">
+                    ({formatCurrency(receivedIncomeMonthTotal)} recebido +{" "}
+                    {formatCurrency(pendingIncomeMonthTotal)} a receber)
+                  </span>
+                )}
               </span>
-              <span className="px-2.5 py-1.5 rounded-lg bg-indigo-50 text-indigo-700 font-medium">
-                Dízimo previsto ({parsedPct}%): <strong>{formatCurrency(expectedMonthTithe)}</strong>
+              <span className="px-2.5 py-1.5 rounded-lg bg-indigo-50 text-indigo-800 font-medium">
+                Dízimo previsto ({parsedPct}%):{" "}
+                <strong>{formatCurrency(projectedMonthTithe)}</strong>
+                {!enabled && (
+                  <span className="ml-1 text-[11px] text-slate-500">(automático pausado)</span>
+                )}
+                {enabled && pendingIncomeMonthTotal > 0 && receivedIncomeMonthTotal > 0 && (
+                  <span className="text-[11px] text-indigo-700/80 ml-1">
+                    ({formatCurrency(titheOnReceived)} recebido + {formatCurrency(titheOnPending)} ao receber)
+                  </span>
+                )}
               </span>
               <span className="px-2.5 py-1.5 rounded-lg bg-rose-50 text-rose-700 font-medium">
-                Abatido nas despesas: <strong>{formatCurrency(monthTitheTotal)}</strong>
+                Lançado nas despesas: <strong>{formatCurrency(monthTitheTotal)}</strong>
+                {monthTithePendingTotal > 0 && (
+                  <span className="text-[11px] text-rose-700/80 ml-1">
+                    ({formatCurrency(Math.max(0, monthTitheTotal - monthTithePendingTotal))} pago +{" "}
+                    {formatCurrency(monthTithePendingTotal)} a pagar)
+                  </span>
+                )}
               </span>
             </div>
 
@@ -277,7 +325,7 @@ export default function TitheConfigPanel({
                   className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-semibold transition-colors"
                 >
                   <RefreshCw className="w-3.5 h-3.5" />
-                  Atualizar dízimo das recebidas ({pendingSyncCount})
+                  Lançar / atualizar dízimos ({pendingSyncCount})
                 </button>
               )}
 
