@@ -23,6 +23,7 @@ interface NavbarProps {
   month: string;
   setMonth: (month: string) => void;
   pendingDebtsCount?: number;
+  budgetAlertsCount?: number;
   userName?: string | null;
   userEmail?: string | null;
   onSignOut?: () => void;
@@ -51,6 +52,7 @@ export default function Navbar({
   month,
   setMonth,
   pendingDebtsCount = 0,
+  budgetAlertsCount = 0,
   userName,
   userEmail,
   onSignOut,
@@ -75,7 +77,7 @@ export default function Navbar({
     { id: "goals", label: "Metas", icon: Target },
     { id: "family", label: "Família", icon: Users },
     { id: "simulator", label: "Simulador", icon: Calculator },
-    { id: "ai", label: "Consultor IA", icon: Bot },
+    { id: "ai", label: "Consultor IA", icon: Bot, badge: budgetAlertsCount },
   ];
 
   return (

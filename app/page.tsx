@@ -407,6 +407,10 @@ export default function Home() {
     activeOverdueDebts.length +
     monthInstallmentsDueCount;
 
+  const budgetAlertsCount = monthBudgets.filter(
+    (b) => b.allocated > 0 && (b.spent / b.allocated) * 100 > 80
+  ).length;
+
   // Handlers
   const handleMonthChange = (nextMonth: string) => {
     setMonth(nextMonth);
@@ -926,6 +930,7 @@ export default function Home() {
         month={month}
         setMonth={handleMonthChange}
         pendingDebtsCount={pendingDebtsCount}
+        budgetAlertsCount={budgetAlertsCount}
         userName={user.displayName}
         userEmail={user.email}
         onSignOut={handleSignOut}
@@ -1116,6 +1121,7 @@ export default function Home() {
             incomes={monthIncomes}
             budgets={monthBudgets}
             goals={goals}
+            referenceMonth={month}
           />
         )}
       </main>
